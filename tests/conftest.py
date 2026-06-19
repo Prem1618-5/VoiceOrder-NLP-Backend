@@ -86,8 +86,13 @@ from app.sessions.models import Session  # noqa: E402, F401
 
 
 # ── Test database engine (separate from production _engine in dependencies.py) ─
+from sqlalchemy.pool import NullPool  # noqa: E402
 
-_test_engine = create_async_engine(settings.DATABASE_URL, echo=False)
+_test_engine = create_async_engine(
+    settings.DATABASE_URL,
+    echo=False,
+    poolclass=NullPool,
+)
 _TestSessionLocal = async_sessionmaker(
     _test_engine, class_=AsyncSession, expire_on_commit=False
 )
