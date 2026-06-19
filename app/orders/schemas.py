@@ -9,9 +9,9 @@ PaginatedOrders     → full paginated response for GET /orders/history
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from app.nlp.schemas import OrderItem, RawEntity
 
@@ -26,10 +26,10 @@ class OrderParseRequest(BaseModel):
       text: min_length=2, max_length=500, strip_whitespace=True
     """
 
-    text: str = Field(
-        min_length=2,
-        max_length=500,
-        strip_whitespace=True,
+    text: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=2, max_length=500),
+    ] = Field(
         description=(
             "Free-text restaurant order "
             "(e.g. 'I want 2 large pepperoni pizzas with extra cheese')"

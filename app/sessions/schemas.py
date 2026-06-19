@@ -9,9 +9,9 @@ SessionOrderResponse  → GET  /session/{id}/order
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Annotated, Any, Dict, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 
 # ── POST /session/start ───────────────────────────────────────────────────────
@@ -38,10 +38,10 @@ class MessageRequest(BaseModel):
     Constraints per Data Security spec: min_length=1, max_length=500.
     """
 
-    text: str = Field(
-        min_length=1,
-        max_length=500,
-        strip_whitespace=True,
+    text: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=500),
+    ] = Field(
         description=(
             "Next utterance in the conversation "
             "(e.g. 'make that 3', 'and add a coke', 'extra cheese')"

@@ -3,8 +3,12 @@ import uuid
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from pydantic import ValidationError
+
 from app.nlp.schemas import ParsedOrder, OrderItem, RawEntity
+from app.orders.schemas import OrderParseRequest
 from app.sessions.models import Session
+from app.sessions.schemas import MessageRequest
 from app.orders.models import Order
 from app.sessions.service import (
     _redis_key,
@@ -415,3 +419,54 @@ async def test_close_session_with_items():
     assert orders[0].session_id == session_id
     assert orders[0].total_price == 15.0
     assert orders[0].status == "confirmed"
+
+
+# ── Schema validation: strip_whitespace ──────────────────────────────────────
+
+
+class TestMessageRequestStripWhitespace:
+    """Verify MessageRequest.text strips whitespace before applying min_length."""
+
+    def test_whitespace_only_rejected(self):
+        """Whitespace-only text → stripped to '' → fails min_length=1 → 422."""
+        with pytest.raises(ValidationError):
+            MessageRequest(text="   ")
+
+    def test_empty_string_rejected(self):
+        """Empty string → fails min_length=1."""
+        with pytest.raises(ValidationError):
+            MessageRequest(text="")
+
+    def test_text_stripped(self):
+        """Leading/trailing whitespace is stripped from valid text."""
+        r = MessageRequest(text="  hello  ")
+        assert r.text == "hello"
+
+    def test_valid_text_passes(self):
+        """Normal text passes validation."""
+        r = MessageRequest(text="I want a pizza")
+        assert r.text == "I want a pizza"
+
+    def test_max_length_enforced(self):
+        """Text exceeding 500 chars (after stripping) → fails max_length=500."""
+        with pytest.raises(ValidationError):
+            MessageRequest(text="a" * 501)
+
+
+class TestOrderParseRequestStripWhitespace:
+    """Verify OrderParseRequest.text strips whitespace before applying min_length."""
+
+    def test_whitespace_only_rejected(self):
+        """Whitespace-only text → stripped to '' → fails min_length=2 → 422."""
+        with pytest.raises(ValidationError):
+            OrderParseRequest(text="   ")
+
+    def test_single_char_rejected(self):
+        """Single char after stripping → fails min_length=2."""
+        with pytest.raises(ValidationError):
+            OrderParseRequest(text="  x  ")
+
+    def test_text_stripped(self):
+        """Leading/trailing whitespace is stripped from valid text."""
+        r = OrderParseRequest(text="  hello world  ")
+        assert r.text == "hello world"
