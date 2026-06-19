@@ -51,8 +51,10 @@ os.environ.setdefault(
 )
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379")
 os.environ.setdefault("ENVIRONMENT", "test")
-os.environ.setdefault("JWT_PRIVATE_KEY", _PRIV)
-os.environ.setdefault("JWT_PUBLIC_KEY", _PUB)
+# Direct assignment (not setdefault): CI secrets may be malformed/incompatible
+# with test fixtures; generated keypair must always win in the test environment.
+os.environ["JWT_PRIVATE_KEY"] = _PRIV
+os.environ["JWT_PUBLIC_KEY"] = _PUB
 os.environ.setdefault("ACCESS_TOKEN_EXPIRE_HOURS", "1")
 os.environ.setdefault("ALLOWED_ORIGINS", "http://localhost:3000")
 os.environ.setdefault("NLP_CONFIDENCE_THRESHOLD", "0.6")
