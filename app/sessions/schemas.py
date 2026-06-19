@@ -6,17 +6,20 @@ MessageRequest        → POST /session/{id}/message request body
 MessageResponse       → POST /session/{id}/message response
 SessionOrderResponse  → GET  /session/{id}/order
 """
+
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
 
 
 # ── POST /session/start ───────────────────────────────────────────────────────
 
+
 class SessionStartResponse(BaseModel):
     """Returned when a new session is created."""
+
     session_id: uuid.UUID
     status: str = "active"
     created_at: datetime
@@ -28,11 +31,13 @@ class SessionStartResponse(BaseModel):
 
 # ── POST /session/{id}/message ────────────────────────────────────────────────
 
+
 class MessageRequest(BaseModel):
     """
     Request body for POST /session/{id}/message.
     Constraints per Data Security spec: min_length=1, max_length=500.
     """
+
     text: str = Field(
         min_length=1,
         max_length=500,
@@ -50,17 +55,20 @@ class MessageResponse(BaseModel):
     `context_applied` is True when the new utterance modified the existing order
     (i.e. was understood as an update rather than new input).
     """
-    updated_order: Dict[str, Any]   # current_order dict from Redis
+
+    updated_order: Dict[str, Any]  # current_order dict from Redis
     turn: int
-    context_applied: bool           # True when "make that 3" style update occurred
+    context_applied: bool  # True when "make that 3" style update occurred
 
 
 # ── GET /session/{id}/order ───────────────────────────────────────────────────
 
+
 class SessionOrderResponse(BaseModel):
     """Current compiled order for an active session."""
+
     session_id: uuid.UUID
     turn: int
     status: str
-    current_order: Dict[str, Any]           # {"items": [...], "total_price": X}
+    current_order: Dict[str, Any]  # {"items": [...], "total_price": X}
     last_food_entity: Optional[str] = None  # most recent FOOD entity (for context)

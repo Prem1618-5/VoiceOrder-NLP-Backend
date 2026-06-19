@@ -3,6 +3,7 @@ Application configuration via pydantic-settings.
 All sensitive values are loaded from environment variables / .env file.
 Never import settings from here and mutate them — treat as read-only.
 """
+
 from functools import lru_cache
 from typing import List
 
@@ -25,8 +26,8 @@ class Settings(BaseSettings):
     REDIS_URL: str  # redis://user:pw@host:port
 
     # ── JWT RS256 ─────────────────────────────────────────────────────────────
-    JWT_PRIVATE_KEY: str   # PEM string — signs tokens (keep secret)
-    JWT_PUBLIC_KEY: str    # PEM string — verifies tokens (safe to share)
+    JWT_PRIVATE_KEY: str  # PEM string — signs tokens (keep secret)
+    JWT_PUBLIC_KEY: str  # PEM string — verifies tokens (safe to share)
     ACCESS_TOKEN_EXPIRE_HOURS: int = 24  # 24h demo | 1h prod
 
     # ── App ───────────────────────────────────────────────────────────────────
@@ -35,8 +36,8 @@ class Settings(BaseSettings):
 
     # ── NLP ───────────────────────────────────────────────────────────────────
     SPACY_MODEL: str = "en_core_web_sm"
-    NLP_CONFIDENCE_THRESHOLD: float = 0.6   # below → for_review=true
-    FUZZY_SCORE_CUTOFF: int = 75            # rapidfuzz menu-match threshold
+    NLP_CONFIDENCE_THRESHOLD: float = 0.6  # below → for_review=true
+    FUZZY_SCORE_CUTOFF: int = 75  # rapidfuzz menu-match threshold
 
     # ── Validators ───────────────────────────────────────────────────────────
     @field_validator("ENVIRONMENT")

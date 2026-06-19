@@ -14,9 +14,9 @@ Multi-turn scenarios tested:
   • Turn 2 → "make that 3" → quantity updated in-place (context_applied=True)
   • Turn 3 → "and a coke" → new item added alongside existing
 """
+
 import uuid
 
-import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,9 +28,8 @@ from tests.conftest import _FakeRedis
 
 # ── POST /session/start ───────────────────────────────────────────────────────
 
-async def test_start_session_success(
-    client: AsyncClient, auth_headers: dict
-) -> None:
+
+async def test_start_session_success(client: AsyncClient, auth_headers: dict) -> None:
     """Authenticated user can start a session; response contains session_id."""
     response = await client.post("/session/start", headers=auth_headers)
 
@@ -63,6 +62,7 @@ async def test_start_session_creates_redis_context(
     assert raw is not None
 
     import json
+
     context = json.loads(raw)
     assert context["session_id"] == session_id
     assert context["turn"] == 0
@@ -71,9 +71,8 @@ async def test_start_session_creates_redis_context(
 
 # ── POST /session/{id}/message — basic ───────────────────────────────────────
 
-async def test_session_message_basic(
-    client: AsyncClient, auth_headers: dict
-) -> None:
+
+async def test_session_message_basic(client: AsyncClient, auth_headers: dict) -> None:
     """Sending an utterance returns updated_order, turn, context_applied."""
     # Start session
     start = await client.post("/session/start", headers=auth_headers)
@@ -114,6 +113,7 @@ async def test_session_message_increments_turn(
 
 
 # ── Multi-turn scenario: quantity update ──────────────────────────────────────
+
 
 async def test_multi_turn_quantity_update(
     client: AsyncClient, auth_headers: dict
@@ -179,7 +179,7 @@ async def test_multi_turn_add_second_item(
     assert t2.status_code == 200
     items = t2.json()["updated_order"]["items"]
     # Total items should grow (at least coke was added, pepperoni may still be there)
-    assert len(items) >= 1   # at minimum something is in the order
+    assert len(items) >= 1  # at minimum something is in the order
 
 
 async def test_multi_turn_order_accumulates_price(
@@ -205,9 +205,8 @@ async def test_multi_turn_order_accumulates_price(
 
 # ── GET /session/{id}/order ───────────────────────────────────────────────────
 
-async def test_get_session_order(
-    client: AsyncClient, auth_headers: dict
-) -> None:
+
+async def test_get_session_order(client: AsyncClient, auth_headers: dict) -> None:
     """GET /session/{id}/order returns current order state without modifying it."""
     start = await client.post("/session/start", headers=auth_headers)
     session_id = start.json()["session_id"]
@@ -218,9 +217,7 @@ async def test_get_session_order(
         headers=auth_headers,
     )
 
-    response = await client.get(
-        f"/session/{session_id}/order", headers=auth_headers
-    )
+    response = await client.get(f"/session/{session_id}/order", headers=auth_headers)
     assert response.status_code == 200
     body = response.json()
     assert body["session_id"] == session_id
@@ -247,6 +244,7 @@ async def test_get_session_order_not_modified_by_get(
 
 # ── DELETE /session/{id} ──────────────────────────────────────────────────────
 
+
 async def test_close_session_returns_204(
     client: AsyncClient, auth_headers: dict
 ) -> None:
@@ -254,9 +252,7 @@ async def test_close_session_returns_204(
     start = await client.post("/session/start", headers=auth_headers)
     session_id = start.json()["session_id"]
 
-    response = await client.delete(
-        f"/session/{session_id}", headers=auth_headers
-    )
+    response = await client.delete(f"/session/{session_id}", headers=auth_headers)
     assert response.status_code == 204
 
 
@@ -294,9 +290,7 @@ async def test_close_session_persists_order_to_db(
     )
 
     # Close
-    close_resp = await client.delete(
-        f"/session/{session_id}", headers=auth_headers
-    )
+    close_resp = await client.delete(f"/session/{session_id}", headers=auth_headers)
     assert close_resp.status_code == 204
 
     # Check DB — should have a confirmed order linked to this session
@@ -306,7 +300,7 @@ async def test_close_session_persists_order_to_db(
         Order.status == "confirmed",
     )
     result = await db_session.execute(stmt)
-    order = result.scalar_one_or_none()
+    result.scalar_one_or_none()
 
     # Order may be None if no food items were actually extracted (NLP)
     # but the endpoint must not error; we check 204 above.
@@ -322,13 +316,12 @@ async def test_close_session_not_accessible_after_close(
     await client.delete(f"/session/{session_id}", headers=auth_headers)
 
     # Any subsequent operation on the closed session must 404
-    response = await client.get(
-        f"/session/{session_id}/order", headers=auth_headers
-    )
+    response = await client.get(f"/session/{session_id}/order", headers=auth_headers)
     assert response.status_code == 404
 
 
 # ── Auth guards ───────────────────────────────────────────────────────────────
+
 
 async def test_session_message_no_auth(client: AsyncClient) -> None:
     """Missing token on session message → 4xx."""
@@ -349,6 +342,7 @@ async def test_get_session_order_no_auth(client: AsyncClient) -> None:
 
 # ── Not-found / expired session ───────────────────────────────────────────────
 
+
 async def test_message_to_nonexistent_session(
     client: AsyncClient, auth_headers: dict
 ) -> None:
@@ -367,9 +361,7 @@ async def test_get_order_nonexistent_session(
 ) -> None:
     """Getting order for a non-existent session → 404."""
     fake_id = str(uuid.uuid4())
-    response = await client.get(
-        f"/session/{fake_id}/order", headers=auth_headers
-    )
+    response = await client.get(f"/session/{fake_id}/order", headers=auth_headers)
     assert response.status_code == 404
 
 
@@ -378,13 +370,12 @@ async def test_delete_nonexistent_session(
 ) -> None:
     """Deleting a non-existent session → 404."""
     fake_id = str(uuid.uuid4())
-    response = await client.delete(
-        f"/session/{fake_id}", headers=auth_headers
-    )
+    response = await client.delete(f"/session/{fake_id}", headers=auth_headers)
     assert response.status_code == 404
 
 
 # ── User isolation (Data Security spec) ──────────────────────────────────────
+
 
 async def test_session_user_isolation_message(
     client: AsyncClient,
@@ -442,6 +433,7 @@ async def test_session_user_isolation_delete(
 
 # ── Input validation ──────────────────────────────────────────────────────────
 
+
 async def test_session_message_empty_text(
     client: AsyncClient, auth_headers: dict
 ) -> None:
@@ -451,7 +443,7 @@ async def test_session_message_empty_text(
 
     response = await client.post(
         f"/session/{session_id}/message",
-        json={"text": "   "},   # whitespace only → stripped to "" → 422
+        json={"text": "   "},  # whitespace only → stripped to "" → 422
         headers=auth_headers,
     )
     assert response.status_code == 422
@@ -466,7 +458,7 @@ async def test_session_message_text_too_long(
 
     response = await client.post(
         f"/session/{session_id}/message",
-        json={"text": "a " * 260},   # 520 chars
+        json={"text": "a " * 260},  # 520 chars
         headers=auth_headers,
     )
     assert response.status_code == 422

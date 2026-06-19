@@ -11,9 +11,11 @@ dependency graph acyclic:
   db.base  ←  all model modules
   db.migrations.env  ←  db.base + all model modules (for Alembic discovery)
 """
+
 from sqlalchemy.orm import DeclarativeBase
 
 
 class Base(DeclarativeBase):
     """Project-wide SQLAlchemy 2.0 declarative base."""
+
     pass

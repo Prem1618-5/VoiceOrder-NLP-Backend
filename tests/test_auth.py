@@ -5,19 +5,19 @@ Auth tests — covers:
   JWT lifecycle        (valid token accepted, expired/invalid rejected)
   Protected route      (missing/bad token → 4xx)
 """
-import uuid
+
 from datetime import datetime, timedelta, timezone
 
-import pytest
 from httpx import AsyncClient
 from jose import jwt
 
 from app.auth.models import User
-from app.auth.service import create_access_token, hash_password
+from app.auth.service import create_access_token
 from app.config import settings
 
 
 # ── POST /auth/register ───────────────────────────────────────────────────────
+
 
 async def test_register_success(client: AsyncClient) -> None:
     """New user registration returns 201 with correct fields."""
@@ -28,7 +28,7 @@ async def test_register_success(client: AsyncClient) -> None:
     body = response.json()
     assert body["email"] == "newuser@test.dev"
     assert "id" in body
-    assert "hashed_pw" not in body          # never exposed in response
+    assert "hashed_pw" not in body  # never exposed in response
     assert "password" not in body
     assert body["is_active"] is True
 
@@ -67,6 +67,7 @@ async def test_register_password_max_length(client: AsyncClient) -> None:
 
 
 # ── POST /auth/token ──────────────────────────────────────────────────────────
+
 
 async def test_token_valid_credentials(client: AsyncClient, test_user: User) -> None:
     """
@@ -115,9 +116,7 @@ async def test_token_nonexistent_email(client: AsyncClient) -> None:
     assert "Invalid credentials" in response.json()["detail"]
 
 
-async def test_token_inactive_user(
-    client: AsyncClient, inactive_user: User
-) -> None:
+async def test_token_inactive_user(client: AsyncClient, inactive_user: User) -> None:
     """
     Inactive (disabled) user cannot obtain a token.
     authenticate_user() returns None for inactive users → 401.
@@ -130,6 +129,7 @@ async def test_token_inactive_user(
 
 
 # ── JWT lifecycle tests (direct decode, no HTTP) ─────────────────────────────
+
 
 def test_jwt_is_rs256(test_user: User) -> None:
     """create_access_token must produce an RS256 token."""
@@ -152,7 +152,7 @@ def test_jwt_expiry_is_correct(test_user: User) -> None:
     """Token expiry is ACCESS_TOKEN_EXPIRE_HOURS hours from now (±60s tolerance)."""
     before = datetime.now(timezone.utc)
     token = create_access_token(test_user.id)
-    after = datetime.now(timezone.utc)
+    datetime.now(timezone.utc)
 
     payload = jwt.decode(token, settings.JWT_PUBLIC_KEY, algorithms=["RS256"])
     exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
@@ -162,6 +162,7 @@ def test_jwt_expiry_is_correct(test_user: User) -> None:
 
 
 # ── Protected-route access ────────────────────────────────────────────────────
+
 
 async def test_protected_route_no_token(client: AsyncClient) -> None:
     """Missing Authorization header → HTTPBearer raises 4xx (403 in FastAPI default)."""
@@ -185,7 +186,7 @@ async def test_protected_route_expired_token(
     expired_payload = {
         "sub": str(test_user.id),
         "iat": now - timedelta(hours=2),
-        "exp": now - timedelta(hours=1),   # already expired
+        "exp": now - timedelta(hours=1),  # already expired
         "type": "access",
     }
     expired_token = jwt.encode(
@@ -208,14 +209,9 @@ async def test_protected_route_wrong_algorithm_token(
     from cryptography.hazmat.backends import default_backend
     from cryptography.hazmat.primitives.asymmetric import rsa as _rsa
 
-    rogue_key = _rsa.generate_private_key(65537, 2048, default_backend())
-    rogue_pem = rogue_key.private_bytes(
-        serialization.Encoding.PEM,
-        serialization.PrivateFormat.TraditionalOpenSSL,
-        serialization.NoEncryption(),
-    ).decode()
-
     from cryptography.hazmat.primitives import serialization
+
+    rogue_key = _rsa.generate_private_key(65537, 2048, default_backend())
     rogue_pem = rogue_key.private_bytes(
         serialization.Encoding.PEM,
         serialization.PrivateFormat.TraditionalOpenSSL,
@@ -252,11 +248,14 @@ async def test_protected_route_inactive_user_token(
 
 # ── Error response format (Data Security spec) ───────────────────────────────
 
+
 async def test_error_responses_have_no_stack_traces(client: AsyncClient) -> None:
     """
     4xx error responses must not contain stack traces or internal details.
     """
-    response = await client.post("/auth/token", json={"email": "x@y.com", "password": "wrong"})
+    response = await client.post(
+        "/auth/token", json={"email": "x@y.com", "password": "wrong"}
+    )
     body_text = response.text
     assert "Traceback" not in body_text
     assert "sqlalchemy" not in body_text.lower()

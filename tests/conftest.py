@@ -32,17 +32,23 @@ def _generate_rsa_keypair() -> tuple[str, str]:
         format=serialization.PrivateFormat.TraditionalOpenSSL,
         encryption_algorithm=serialization.NoEncryption(),
     ).decode()
-    public_pem = key.public_key().public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    ).decode()
+    public_pem = (
+        key.public_key()
+        .public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode()
+    )
     return private_pem, public_pem
 
 
 _PRIV, _PUB = _generate_rsa_keypair()
 
 # setdefault: CI secrets already in env take precedence; local dev uses generated keys
-os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost:5432/voiceorder_test")
+os.environ.setdefault(
+    "DATABASE_URL", "postgresql+asyncpg://test:test@localhost:5432/voiceorder_test"
+)
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379")
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("JWT_PRIVATE_KEY", _PRIV)
@@ -58,25 +64,25 @@ from app.config import get_settings  # noqa: E402
 get_settings.cache_clear()
 
 # ── Step 4 — all remaining imports ───────────────────────────────────────────
-import pytest                                                         # noqa: E402
-import pytest_asyncio                                                 # noqa: E402
-from httpx import ASGITransport, AsyncClient                         # noqa: E402
-from sqlalchemy.ext.asyncio import (                                 # noqa: E402
+import pytest  # noqa: E402
+import pytest_asyncio  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy.ext.asyncio import (  # noqa: E402
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 
-from app.auth.models import User                                     # noqa: E402
-from app.auth.service import create_access_token, hash_password      # noqa: E402
-from app.config import settings                                      # noqa: E402
-from app.dependencies import get_db, get_redis                       # noqa: E402
-from app.main import app                                             # noqa: E402
-from db.base import Base                                             # noqa: E402
+from app.auth.models import User  # noqa: E402
+from app.auth.service import create_access_token, hash_password  # noqa: E402
+from app.config import settings  # noqa: E402
+from app.dependencies import get_db, get_redis  # noqa: E402
+from app.main import app  # noqa: E402
+from db.base import Base  # noqa: E402
 
 # Import all models so Base.metadata is fully populated before create_all
-from app.orders.models import MenuItem, Order    # noqa: E402, F401
-from app.sessions.models import Session          # noqa: E402, F401
+from app.orders.models import MenuItem, Order  # noqa: E402, F401
+from app.sessions.models import Session  # noqa: E402, F401
 
 
 # ── Test database engine (separate from production _engine in dependencies.py) ─
@@ -88,6 +94,7 @@ _TestSessionLocal = async_sessionmaker(
 
 
 # ── In-memory Redis substitute ────────────────────────────────────────────────
+
 
 class _FakeRedis:
     """
@@ -135,6 +142,7 @@ class _FakeRedis:
 
 # ── Session-scoped: create tables once, drop at end of suite ─────────────────
 
+
 @pytest_asyncio.fixture(scope="session")
 async def create_test_tables():
     """Create all ORM tables before the test session; drop them after."""
@@ -147,6 +155,7 @@ async def create_test_tables():
 
 
 # ── Function-scoped: rolled-back transaction per test ────────────────────────
+
 
 @pytest_asyncio.fixture
 async def db_session(create_test_tables) -> AsyncSession:
@@ -161,6 +170,7 @@ async def db_session(create_test_tables) -> AsyncSession:
 
 # ── FakeRedis fixture (fresh store per test) ──────────────────────────────────
 
+
 @pytest.fixture
 def mock_redis() -> _FakeRedis:
     """Return a clean in-memory Redis substitute for each test."""
@@ -168,6 +178,7 @@ def mock_redis() -> _FakeRedis:
 
 
 # ── Async HTTP test client with dependency overrides ─────────────────────────
+
 
 @pytest_asyncio.fixture
 async def client(db_session: AsyncSession, mock_redis: _FakeRedis) -> AsyncClient:
@@ -197,6 +208,7 @@ async def client(db_session: AsyncSession, mock_redis: _FakeRedis) -> AsyncClien
 
 
 # ── Test user fixtures ────────────────────────────────────────────────────────
+
 
 @pytest_asyncio.fixture
 async def test_user(db_session: AsyncSession) -> User:

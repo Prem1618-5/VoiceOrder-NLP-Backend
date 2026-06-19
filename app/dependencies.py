@@ -6,6 +6,7 @@ FastAPI dependency injection providers.
   get_current_user() → authenticated & active User instance
   limiter            → slowapi Limiter (imported in main.py + routers)
 """
+
 import logging
 from typing import AsyncGenerator
 
@@ -24,6 +25,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 # ── Rate-limiter key function ─────────────────────────────────────────────────
+
 
 def _rate_limit_key(request: Request) -> str:
     """
@@ -52,7 +54,7 @@ def _rate_limit_key(request: Request) -> str:
     forwarded_for = request.headers.get("X-Forwarded-For")
     if forwarded_for:
         return forwarded_for.split(",")[0].strip()
-    return (request.client.host if request.client else "unknown")
+    return request.client.host if request.client else "unknown"
 
 
 limiter = Limiter(key_func=_rate_limit_key)
@@ -61,10 +63,10 @@ limiter = Limiter(key_func=_rate_limit_key)
 
 _engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=not settings.is_production,   # log SQL in dev / test only
+    echo=not settings.is_production,  # log SQL in dev / test only
     pool_size=10,
     max_overflow=5,
-    pool_pre_ping=True,                # recycle dead connections
+    pool_pre_ping=True,  # recycle dead connections
     pool_timeout=30,
 )
 

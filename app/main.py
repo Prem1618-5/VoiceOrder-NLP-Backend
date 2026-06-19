@@ -8,6 +8,7 @@ Initialises:
   • Global exception handler (no internal details in responses)
   • Request timing middleware
 """
+
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -35,12 +36,11 @@ logger = logging.getLogger(__name__)
 
 # ── Lifespan ─────────────────────────────────────────────────────────────────
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup / shutdown lifecycle hooks."""
-    logger.info(
-        "VoiceOrder NLP Backend starting — env=%s", settings.ENVIRONMENT
-    )
+    logger.info("VoiceOrder NLP Backend starting — env=%s", settings.ENVIRONMENT)
     yield
     logger.info("VoiceOrder NLP Backend shutting down")
 
@@ -80,20 +80,21 @@ else:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_credentials=False,   # JWT in header — no cookies
+    allow_credentials=False,  # JWT in header — no cookies
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 
-app.include_router(auth_router,       prefix="/auth",    tags=["auth"])
-app.include_router(orders_router,                        tags=["orders"])
-app.include_router(sessions_router,                      tags=["sessions"])
-app.include_router(monitoring_router,                    tags=["monitoring"])
+app.include_router(auth_router, prefix="/auth", tags=["auth"])
+app.include_router(orders_router, tags=["orders"])
+app.include_router(sessions_router, tags=["sessions"])
+app.include_router(monitoring_router, tags=["monitoring"])
 
 
 # ── Middleware ────────────────────────────────────────────────────────────────
+
 
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
@@ -106,6 +107,7 @@ async def add_process_time_header(request: Request, call_next):
 
 
 # ── Global exception handler ──────────────────────────────────────────────────
+
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:

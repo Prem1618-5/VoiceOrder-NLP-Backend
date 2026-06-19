@@ -5,6 +5,7 @@ Routes:
   POST /auth/register  → create account, return UserRead
   POST /auth/token     → verify credentials, return JWT (rate-limited: 5/min)
 """
+
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -19,6 +20,7 @@ router = APIRouter()
 
 
 # ── Register ──────────────────────────────────────────────────────────────────
+
 
 @router.post(
     "/register",
@@ -47,14 +49,15 @@ async def register(
 
 # ── Token ─────────────────────────────────────────────────────────────────────
 
+
 @router.post(
     "/token",
     response_model=TokenResponse,
     summary="Obtain a JWT access token",
 )
-@limiter.limit("5/minute")          # Brute-force protection — IP-based
+@limiter.limit("5/minute")  # Brute-force protection — IP-based
 async def get_token(
-    request: Request,               # required by slowapi
+    request: Request,  # required by slowapi
     data: TokenRequest,
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:

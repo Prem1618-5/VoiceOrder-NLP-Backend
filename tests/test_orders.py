@@ -8,21 +8,19 @@ Covers:
   Redis metric counters   (incremented on parse)
   Error format            (no stack traces, correct detail messages)
 """
+
 import uuid
 
-import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.models import User
 from tests.conftest import _FakeRedis
 
 
 # ── POST /order/parse — success ───────────────────────────────────────────────
 
-async def test_parse_order_success(
-    client: AsyncClient, auth_headers: dict
-) -> None:
+
+async def test_parse_order_success(client: AsyncClient, auth_headers: dict) -> None:
     """Valid JWT + valid text → 200 with structured response."""
     payload = {"text": "I want 2 large pepperoni pizzas with extra cheese"}
     response = await client.post("/order/parse", json=payload, headers=auth_headers)
@@ -53,7 +51,7 @@ async def test_parse_order_returns_valid_uuid(
 
     assert response.status_code == 200
     order_id = response.json()["id"]
-    parsed = uuid.UUID(order_id)   # raises ValueError if invalid
+    parsed = uuid.UUID(order_id)  # raises ValueError if invalid
     assert str(parsed) == order_id
 
 
@@ -130,7 +128,7 @@ async def test_parse_order_for_review_flag_propagated(
     for_review field in response reflects NLP pipeline output.
     Low-confidence / unrecognised input should set for_review=True.
     """
-    payload = {"text": "xyzzy plugh zork thud blorp"}   # gibberish
+    payload = {"text": "xyzzy plugh zork thud blorp"}  # gibberish
     response = await client.post("/order/parse", json=payload, headers=auth_headers)
 
     assert response.status_code == 200
@@ -141,6 +139,7 @@ async def test_parse_order_for_review_flag_propagated(
 
 
 # ── POST /order/parse — auth guards ──────────────────────────────────────────
+
 
 async def test_parse_order_no_auth(client: AsyncClient) -> None:
     """Missing Authorization header → 4xx (HTTPBearer auto_error)."""
@@ -159,6 +158,7 @@ async def test_parse_order_invalid_token(client: AsyncClient) -> None:
 
 # ── POST /order/parse — input validation ─────────────────────────────────────
 
+
 async def test_parse_order_text_too_short(
     client: AsyncClient, auth_headers: dict
 ) -> None:
@@ -172,7 +172,7 @@ async def test_parse_order_text_too_long(
     client: AsyncClient, auth_headers: dict
 ) -> None:
     """text > 500 chars → 422 Pydantic validation error."""
-    payload = {"text": "pepperoni " * 55}   # 550 chars
+    payload = {"text": "pepperoni " * 55}  # 550 chars
     response = await client.post("/order/parse", json=payload, headers=auth_headers)
     assert response.status_code == 422
 
@@ -191,14 +191,13 @@ async def test_parse_order_strips_whitespace(
     """Leading/trailing whitespace is stripped (strip_whitespace=True in schema)."""
     payload = {"text": "   I want a coke   "}
     response = await client.post("/order/parse", json=payload, headers=auth_headers)
-    assert response.status_code == 200   # not rejected after stripping
+    assert response.status_code == 200  # not rejected after stripping
 
 
 # ── GET /orders/history ───────────────────────────────────────────────────────
 
-async def test_order_history_empty(
-    client: AsyncClient, auth_headers: dict
-) -> None:
+
+async def test_order_history_empty(client: AsyncClient, auth_headers: dict) -> None:
     """Fresh user with no orders → empty list with correct pagination fields."""
     response = await client.get("/orders/history", headers=auth_headers)
 
@@ -209,9 +208,7 @@ async def test_order_history_empty(
     assert body["total"] == 0
 
 
-async def test_order_history_populated(
-    client: AsyncClient, auth_headers: dict
-) -> None:
+async def test_order_history_populated(client: AsyncClient, auth_headers: dict) -> None:
     """After parsing two orders, history returns both."""
     for text in ("I want a coke", "Give me french fries"):
         await client.post("/order/parse", json={"text": text}, headers=auth_headers)
@@ -231,9 +228,7 @@ async def test_order_history_pagination_page_param(
     for text in ("order one", "order two", "order three"):
         await client.post("/order/parse", json={"text": text}, headers=auth_headers)
 
-    response = await client.get(
-        "/orders/history?page=1&size=2", headers=auth_headers
-    )
+    response = await client.get("/orders/history?page=1&size=2", headers=auth_headers)
     assert response.status_code == 200
     body = response.json()
     assert body["page"] == 1
@@ -245,15 +240,11 @@ async def test_order_history_size_exceeds_max(
     client: AsyncClient, auth_headers: dict
 ) -> None:
     """size > 100 → 422 Pydantic validation (pagination cap)."""
-    response = await client.get(
-        "/orders/history?size=101", headers=auth_headers
-    )
+    response = await client.get("/orders/history?size=101", headers=auth_headers)
     assert response.status_code == 422
 
 
-async def test_order_history_page_zero(
-    client: AsyncClient, auth_headers: dict
-) -> None:
+async def test_order_history_page_zero(client: AsyncClient, auth_headers: dict) -> None:
     """page=0 → 422 (must be ≥ 1)."""
     response = await client.get("/orders/history?page=0", headers=auth_headers)
     assert response.status_code == 422
@@ -305,6 +296,7 @@ async def test_order_history_items_have_required_fields(
 
 
 # ── Error response format ─────────────────────────────────────────────────────
+
 
 async def test_parse_error_no_stack_trace(client: AsyncClient) -> None:
     """4xx error responses must not expose stack traces."""

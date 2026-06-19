@@ -2,6 +2,7 @@
 SQLAlchemy ORM model for the `users` table.
 Uses SQLAlchemy 2.0 declarative mapping with typed columns.
 """
+
 import uuid
 from datetime import datetime
 
@@ -21,6 +22,7 @@ class User(Base):
         created_at  TIMESTAMP DEFAULT now()
         is_active   BOOLEAN DEFAULT true
     """
+
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(

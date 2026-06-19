@@ -5,6 +5,7 @@ Routes:
   POST /order/parse       NLP parse + persist (JWT required, 20 req/min)
   GET  /orders/history    Paginated order history (JWT required)
 """
+
 import logging
 
 import redis.asyncio as aioredis
@@ -22,6 +23,7 @@ router = APIRouter()
 
 # ── POST /order/parse ─────────────────────────────────────────────────────────
 
+
 @router.post(
     "/order/parse",
     response_model=OrderParseResponse,
@@ -35,7 +37,7 @@ router = APIRouter()
 )
 @limiter.limit("20/minute")
 async def parse_order(
-    request: Request,                           # required by slowapi
+    request: Request,  # required by slowapi
     body: OrderParseRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -86,6 +88,7 @@ async def parse_order(
 
 
 # ── GET /orders/history ───────────────────────────────────────────────────────
+
 
 @router.get(
     "/orders/history",

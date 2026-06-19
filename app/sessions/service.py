@@ -22,6 +22,7 @@ Security (Data Security spec):
   session_id is validated against user_id from JWT before every Redis read/write.
   Users cannot read or write another user's session.
 """
+
 import json
 import logging
 import uuid
@@ -40,11 +41,12 @@ from app.sessions.models import Session
 
 logger = logging.getLogger(__name__)
 
-SESSION_TTL = 1800       # 30 minutes in seconds
-MAX_CONVERSATION = 20    # cap stored turns to limit Redis value size
+SESSION_TTL = 1800  # 30 minutes in seconds
+MAX_CONVERSATION = 20  # cap stored turns to limit Redis value size
 
 
 # ── Redis key helper ──────────────────────────────────────────────────────────
+
 
 def _redis_key(session_id: uuid.UUID) -> str:
     """Return the Redis key for a session. Format: session:{uuid}"""
@@ -53,9 +55,8 @@ def _redis_key(session_id: uuid.UUID) -> str:
 
 # ── Context builder ───────────────────────────────────────────────────────────
 
-def _build_initial_context(
-    session_id: uuid.UUID, user_id: uuid.UUID
-) -> Dict[str, Any]:
+
+def _build_initial_context(session_id: uuid.UUID, user_id: uuid.UUID) -> Dict[str, Any]:
     """Create the blank Redis context for a freshly created session."""
     return {
         "session_id": str(session_id),
@@ -68,6 +69,7 @@ def _build_initial_context(
 
 
 # ── Entity merging (core multi-turn logic) ────────────────────────────────────
+
 
 def _merge_order_updates(
     context: Dict[str, Any], parsed: ParsedOrder
@@ -129,9 +131,7 @@ def _merge_order_updates(
         # ── Case 1: new food items ────────────────────────────────────────────
         for new_item in parsed.items:
             new_item_dict = new_item.model_dump()
-            existing = next(
-                (i for i in items if i.get("name") == new_item.name), None
-            )
+            existing = next((i for i in items if i.get("name") == new_item.name), None)
             if existing:
                 # Update in-place (quantity + modifiers may have changed)
                 existing["quantity"] = new_item.quantity
@@ -159,6 +159,7 @@ def _merge_order_updates(
 
 
 # ── Internal context loader with ownership check ──────────────────────────────
+
 
 async def _load_context(
     session_id: uuid.UUID,
@@ -191,6 +192,7 @@ async def _load_context(
 
 
 # ── Public service functions ──────────────────────────────────────────────────
+
 
 async def create_session(
     user_id: uuid.UUID,
@@ -264,12 +266,14 @@ async def process_message(
 
     # Step 5 — conversation history (bounded)
     conversation: List[Dict[str, Any]] = context.get("conversation", [])
-    conversation.append({
-        "turn": turn,
-        "input": text,
-        "entities": [e.model_dump() for e in parsed.raw_entities],
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
+    conversation.append(
+        {
+            "turn": turn,
+            "input": text,
+            "entities": [e.model_dump() for e in parsed.raw_entities],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    )
     if len(conversation) > MAX_CONVERSATION:
         conversation = conversation[-MAX_CONVERSATION:]
     context["conversation"] = conversation
@@ -287,7 +291,9 @@ async def process_message(
 
     logger.info(
         "Session message processed | id=%s turn=%d context_applied=%s items=%d",
-        session_id, turn, context_applied,
+        session_id,
+        turn,
+        context_applied,
         len(context["current_order"].get("items", [])),
     )
     return context["current_order"], turn, context_applied
@@ -343,13 +349,15 @@ async def close_session(
             items=items,
             total_price=current_order.get("total_price", 0.0),
             status="confirmed",
-            confidence=None,   # aggregate confidence not tracked at session level
+            confidence=None,  # aggregate confidence not tracked at session level
             for_review=False,
         )
         db.add(final_order)
         logger.info(
             "Final order persisted for session | session=%s items=%d total=%.2f",
-            session_id, len(items), current_order.get("total_price", 0.0),
+            session_id,
+            len(items),
+            current_order.get("total_price", 0.0),
         )
 
     # Step 3 — close session row
@@ -364,6 +372,4 @@ async def close_session(
     # Step 4 — evict from Redis
     await redis.delete(_redis_key(session_id))
 
-    logger.info(
-        "Session closed | id=%s turns=%d", session_id, context.get("turn", 0)
-    )
+    logger.info("Session closed | id=%s turns=%d", session_id, context.get("turn", 0))

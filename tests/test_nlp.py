@@ -11,7 +11,7 @@ Covers:
   • p95 latency gate: processing_time_ms < 300
   • Extraction accuracy: ≥90% on a 20-sample test set (PRD goal G3)
 """
-import re
+
 import time
 
 import pytest
@@ -27,6 +27,7 @@ from app.nlp.schemas import ParsedOrder
 
 # ── Ensure model is loaded once before tests run ─────────────────────────────
 
+
 @pytest.fixture(scope="module", autouse=True)
 def _load_nlp():
     """Pre-load spaCy model so individual tests don't pay the cold-start cost."""
@@ -35,24 +36,25 @@ def _load_nlp():
 
 # ── Step 1: Preprocessing ─────────────────────────────────────────────────────
 
+
 def test_preprocess_lowercases() -> None:
     assert _preprocess("I Want PEPPERONI") == "i want pepperoni"
 
 
 def test_preprocess_strips_control_chars() -> None:
     """NLP injection defence: control characters must be removed."""
-    dirty = "I want\x00pepperoni\x1Fpizza\x7F"
+    dirty = "I want\x00pepperoni\x1fpizza\x7f"
     clean = _preprocess(dirty)
     assert "\x00" not in clean
-    assert "\x1F" not in clean
-    assert "\x7F" not in clean
+    assert "\x1f" not in clean
+    assert "\x7f" not in clean
     assert "pepperoni" in clean
     assert "pizza" in clean
 
 
 def test_preprocess_hard_truncation() -> None:
     """Input > 500 chars is truncated — prevents model abuse."""
-    long_text = "pepperoni " * 60              # 600 chars
+    long_text = "pepperoni " * 60  # 600 chars
     result = _preprocess(long_text)
     assert len(result) <= 500
 
@@ -64,11 +66,12 @@ def test_preprocess_normalises_whitespace() -> None:
 
 def test_preprocess_empty_after_stripping() -> None:
     """Only control chars — result is empty string, not an error."""
-    result = _preprocess("\x00\x01\x1F")
+    result = _preprocess("\x00\x01\x1f")
     assert result == ""
 
 
 # ── Step 1b: Number normalisation ─────────────────────────────────────────────
+
 
 def test_normalize_two() -> None:
     assert _normalize_numbers("i want two pepperoni") == "i want 2 pepperoni"
@@ -91,6 +94,7 @@ def test_normalize_no_words() -> None:
 
 # ── Entity extraction: core cases ─────────────────────────────────────────────
 
+
 def test_extract_basic_pepperoni() -> None:
     """Standard order parses to at least one item with correct quantity."""
     result = extract_entities("I want 2 large pepperoni pizzas with extra cheese")
@@ -100,7 +104,10 @@ def test_extract_basic_pepperoni() -> None:
     item = result.items[0]
     assert item.quantity == 2
     assert item.size == "large"
-    assert "extra" in " ".join(item.modifiers).lower() or "cheese" in " ".join(item.modifiers).lower()
+    assert (
+        "extra" in " ".join(item.modifiers).lower()
+        or "cheese" in " ".join(item.modifiers).lower()
+    )
 
 
 def test_extract_returns_processing_time() -> None:
@@ -147,11 +154,12 @@ def test_extract_multi_item_order() -> None:
 
 # ── Confidence & for_review ───────────────────────────────────────────────────
 
+
 def test_high_confidence_for_exact_menu_item() -> None:
     """Exact menu item name should produce confidence > 0."""
     result = extract_entities("I want a pepperoni pizza")
     # At least some confidence — exact menu match
-    assert result.confidence >= 0.0   # model may give 0 on empty entity list
+    assert result.confidence >= 0.0  # model may give 0 on empty entity list
 
 
 def test_for_review_false_for_clear_order() -> None:
@@ -183,6 +191,7 @@ def test_confidence_is_between_0_and_1() -> None:
 
 # ── Latency gate (PRD Goal G1: p95 < 300ms on free-tier) ────────────────────
 
+
 def test_processing_time_under_300ms() -> None:
     """
     Single-call latency must be < 300ms.
@@ -209,26 +218,26 @@ def test_processing_time_wall_clock() -> None:
 # "correct" = the expected_food_keyword appears (case-insensitive) in any
 # extracted item name OR in any raw FOOD entity text.
 _ACCURACY_SAMPLES = [
-    ("I want 2 large pepperoni pizzas",         "pepperoni"),
-    ("Give me a margherita pizza",              "margherita"),
-    ("Order 3 cokes please",                   "coke"),
-    ("I'd like french fries",                  "french fries"),
-    ("Can I get a caesar salad",               "caesar salad"),
-    ("Two buffalo wings please",               "buffalo wings"),
-    ("One chocolate milkshake",                "chocolate milkshake"),
-    ("Get me a bacon burger",                  "bacon burger"),
-    ("I want spaghetti bolognese",             "spaghetti bolognese"),
-    ("Order a cheesecake",                     "cheesecake"),
-    ("I'll have a vanilla milkshake",          "vanilla milkshake"),
-    ("Give me garlic bread",                   "garlic bread"),
-    ("I want a veggie burger",                 "veggie burger"),
-    ("One bbq wings please",                   "bbq wings"),
-    ("I'd like a diet coke",                   "diet coke"),
-    ("Can I get onion rings",                  "onion rings"),
-    ("Give me a greek salad",                  "greek salad"),
-    ("I want a classic cheeseburger",          "cheeseburger"),
-    ("One lemonade please",                    "lemonade"),
-    ("I'll have honey garlic wings",           "honey garlic wings"),
+    ("I want 2 large pepperoni pizzas", "pepperoni"),
+    ("Give me a margherita pizza", "margherita"),
+    ("Order 3 cokes please", "coke"),
+    ("I'd like french fries", "french fries"),
+    ("Can I get a caesar salad", "caesar salad"),
+    ("Two buffalo wings please", "buffalo wings"),
+    ("One chocolate milkshake", "chocolate milkshake"),
+    ("Get me a bacon burger", "bacon burger"),
+    ("I want spaghetti bolognese", "spaghetti bolognese"),
+    ("Order a cheesecake", "cheesecake"),
+    ("I'll have a vanilla milkshake", "vanilla milkshake"),
+    ("Give me garlic bread", "garlic bread"),
+    ("I want a veggie burger", "veggie burger"),
+    ("One bbq wings please", "bbq wings"),
+    ("I'd like a diet coke", "diet coke"),
+    ("Can I get onion rings", "onion rings"),
+    ("Give me a greek salad", "greek salad"),
+    ("I want a classic cheeseburger", "cheeseburger"),
+    ("One lemonade please", "lemonade"),
+    ("I'll have honey garlic wings", "honey garlic wings"),
 ]
 
 
@@ -262,8 +271,7 @@ def test_entity_extraction_accuracy() -> None:
 
     accuracy = correct / total
     failure_report = "\n".join(
-        f"  MISS: {t!r} — expected {k!r}, got {names}"
-        for t, k, names in failures
+        f"  MISS: {t!r} — expected {k!r}, got {names}" for t, k, names in failures
     )
     assert accuracy >= 0.90, (
         f"Entity extraction accuracy {accuracy:.0%} < 90% target "

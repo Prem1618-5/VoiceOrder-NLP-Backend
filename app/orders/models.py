@@ -5,13 +5,14 @@ Tables:
   menu_items  — restaurant menu catalogue
   orders      — parsed + persisted order records
 """
+
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, Numeric, String, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Numeric, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base import Base
 
@@ -27,6 +28,7 @@ class MenuItem(Base):
         tags        JSONB     -- ["spicy", "vegetarian"]
         created_at  TIMESTAMP DEFAULT now()
     """
+
     __tablename__ = "menu_items"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -59,6 +61,7 @@ class Order(Base):
         created_at   TIMESTAMP DEFAULT now()
         updated_at   TIMESTAMP DEFAULT now()
     """
+
     __tablename__ = "orders"
 
     id: Mapped[uuid.UUID] = mapped_column(

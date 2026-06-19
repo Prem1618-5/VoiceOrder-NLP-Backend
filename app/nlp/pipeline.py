@@ -23,6 +23,7 @@ Step 6 — Confidence
     confidence = (matched_entities / total_entities) * avg(fuzzy_scores)
     < threshold (default 0.6) → for_review = true
 """
+
 import logging
 import re
 import time
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 # ── Singleton NLP model ───────────────────────────────────────────────────────
 
 _nlp: Optional[Language] = None
-_menu_lookup: Dict[str, Dict[str, Any]] = {}   # name → menu item dict
+_menu_lookup: Dict[str, Dict[str, Any]] = {}  # name → menu item dict
 
 
 def load_model(menu_items: Optional[List[Dict[str, Any]]] = None) -> Language:
@@ -84,11 +85,12 @@ def get_nlp() -> Language:
 
 # ── Step 1: Preprocessing ─────────────────────────────────────────────────────
 
+
 def _preprocess(text: str) -> str:
     """
     Clean and normalise text before NLP processing.
     Implements NLP injection defence from Data Security spec:
-      • Strip control characters (re.sub r'[\x00-\x1F\x7F]')
+      • Strip control characters (re.sub r'[\x00-\x1f\x7f]')
       • Hard truncate at 500 chars
     """
     # Strip control chars
@@ -195,6 +197,7 @@ def _assemble_items(
 
 # ── Step 5: Menu Matching (rapidfuzz) ────────────────────────────────────────
 
+
 def _match_menu(item: OrderItem) -> Tuple[OrderItem, float, bool]:
     """
     Fuzzy-match an assembled item against the menu.
@@ -216,7 +219,9 @@ def _match_menu(item: OrderItem) -> Tuple[OrderItem, float, bool]:
     if result is None:
         # No match above cutoff — mark for_review
         # Find best candidate anyway (for suggestion)
-        fallback = process.extractOne(item.name, menu_names, scorer=fuzz.token_sort_ratio)
+        fallback = process.extractOne(
+            item.name, menu_names, scorer=fuzz.token_sort_ratio
+        )
         nearest = fallback[0] if fallback else item.name
         logger.debug("Menu miss: '%s' → nearest='%s'", item.name, nearest)
         return item, 0.0, False
@@ -224,15 +229,18 @@ def _match_menu(item: OrderItem) -> Tuple[OrderItem, float, bool]:
     matched_name, score, _ = result
     matched_menu = _menu_lookup[matched_name]
 
-    updated = item.model_copy(update={
-        "name": matched_name,
-        "unit_price": matched_menu.get("price"),
-        "matched_menu_item_id": matched_menu.get("id"),
-    })
+    updated = item.model_copy(
+        update={
+            "name": matched_name,
+            "unit_price": matched_menu.get("price"),
+            "matched_menu_item_id": matched_menu.get("id"),
+        }
+    )
     return updated, float(score) / 100.0, True
 
 
 # ── Step 6: Confidence ───────────────────────────────────────────────────────
+
 
 def _compute_confidence(
     raw_entities: List[RawEntity],
@@ -251,6 +259,7 @@ def _compute_confidence(
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
+
 
 def extract_entities(text: str) -> ParsedOrder:
     """
@@ -273,15 +282,17 @@ def extract_entities(text: str) -> ParsedOrder:
     for ent in doc.ents:
         label = ent.label_
         if label in _DISCARD_LABELS:
-            continue          # discard irrelevant entity types
+            continue  # discard irrelevant entity types
         if label not in _ALLOWED_LABELS:
             continue
-        raw_entities.append(RawEntity(
-            text=ent.text,
-            label=label,
-            start=ent.start_char,
-            end=ent.end_char,
-        ))
+        raw_entities.append(
+            RawEntity(
+                text=ent.text,
+                label=label,
+                start=ent.start_char,
+                end=ent.end_char,
+            )
+        )
 
     logger.debug("Extracted %d entities from '%s'", len(raw_entities), processed)
 

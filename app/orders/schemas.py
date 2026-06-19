@@ -6,6 +6,7 @@ OrderParseResponse  → POST /order/parse response (includes NLP artefacts)
 OrderSummary        → single item in GET /orders/history list
 PaginatedOrders     → full paginated response for GET /orders/history
 """
+
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -17,12 +18,14 @@ from app.nlp.schemas import OrderItem, RawEntity
 
 # ── Request ───────────────────────────────────────────────────────────────────
 
+
 class OrderParseRequest(BaseModel):
     """
     Request body for POST /order/parse.
     Constraints (Data Security spec):
       text: min_length=2, max_length=500, strip_whitespace=True
     """
+
     text: str = Field(
         min_length=2,
         max_length=500,
@@ -40,11 +43,13 @@ class OrderParseRequest(BaseModel):
 
 # ── Response ──────────────────────────────────────────────────────────────────
 
+
 class OrderParseResponse(BaseModel):
     """
     Response from POST /order/parse.
     Matches the Technical Spec response schema exactly.
     """
+
     id: uuid.UUID
     items: List[OrderItem]
     confidence: float = Field(ge=0.0, le=1.0)
@@ -55,8 +60,10 @@ class OrderParseResponse(BaseModel):
 
 # ── History ───────────────────────────────────────────────────────────────────
 
+
 class OrderSummary(BaseModel):
     """Single order row in paginated history. ORM-compatible via from_attributes."""
+
     id: uuid.UUID
     session_id: Optional[uuid.UUID] = None
     items: List[Dict[str, Any]]
@@ -71,6 +78,7 @@ class OrderSummary(BaseModel):
 
 class PaginatedOrders(BaseModel):
     """Paginated response for GET /orders/history."""
+
     items: List[OrderSummary]
     page: int = Field(ge=1)
     size: int = Field(ge=1, le=100)

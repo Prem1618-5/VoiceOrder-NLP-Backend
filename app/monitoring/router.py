@@ -5,6 +5,7 @@ Routes:
   GET /health    Uptime, version, DB + Redis connectivity (unlimited)
   GET /metrics   Aggregated Redis counters — rate-limited 10 req/min
 """
+
 import logging
 import time
 from datetime import datetime, timezone
@@ -25,6 +26,7 @@ APP_VERSION = "1.0.0"
 
 
 # ── GET /health ───────────────────────────────────────────────────────────────
+
 
 @router.get(
     "/health",
@@ -70,6 +72,7 @@ async def health_check(
 
 # ── GET /metrics ──────────────────────────────────────────────────────────────
 
+
 @router.get(
     "/metrics",
     summary="Operational metrics (10 req/min, no auth)",
@@ -97,18 +100,16 @@ async def metrics(
     (Data Security spec: "Redis timeout → 'Session service unavailable'").
     """
     try:
-        orders_today   = int(await redis.get("metrics:orders_today")    or 0)
-        errors_today   = int(await redis.get("metrics:errors_today")    or 0)
-        latency_sum    = float(await redis.get("metrics:latency_sum")   or 0.0)
-        latency_count  = int(await redis.get("metrics:latency_count")   or 0)
-        for_review     = int(await redis.get("metrics:for_review_today") or 0)
+        orders_today = int(await redis.get("metrics:orders_today") or 0)
+        errors_today = int(await redis.get("metrics:errors_today") or 0)
+        latency_sum = float(await redis.get("metrics:latency_sum") or 0.0)
+        latency_count = int(await redis.get("metrics:latency_count") or 0)
+        for_review = int(await redis.get("metrics:for_review_today") or 0)
 
         avg_latency_ms = (
             round(latency_sum / latency_count, 2) if latency_count > 0 else 0.0
         )
-        error_rate = (
-            round(errors_today / orders_today, 4) if orders_today > 0 else 0.0
-        )
+        error_rate = round(errors_today / orders_today, 4) if orders_today > 0 else 0.0
 
         return {
             "orders_today": orders_today,

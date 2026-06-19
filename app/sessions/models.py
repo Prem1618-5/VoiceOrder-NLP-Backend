@@ -3,6 +3,7 @@ SQLAlchemy ORM model for the `sessions` table.
 Sessions track multi-turn conversation state in PostgreSQL;
 live context (order state, conversation history) is stored in Redis.
 """
+
 import uuid
 from datetime import datetime
 
@@ -27,6 +28,7 @@ class Session(Base):
         idx_sessions_user   ON sessions(user_id)
         idx_sessions_status ON sessions(status)
     """
+
     __tablename__ = "sessions"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -38,13 +40,13 @@ class Session(Base):
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,     # idx_sessions_user
+        index=True,  # idx_sessions_user
     )
     status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
         default="active",
-        index=True,     # idx_sessions_status
+        index=True,  # idx_sessions_status
     )  # active | closed
     turn_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

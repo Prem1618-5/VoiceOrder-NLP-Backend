@@ -6,6 +6,7 @@ Responsibilities:
   • RS256 JWT creation (python-jose)
   • User creation and lookup (async SQLAlchemy)
 """
+
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -44,6 +45,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 # ── JWT ───────────────────────────────────────────────────────────────────────
 
+
 def create_access_token(user_id: uuid.UUID) -> str:
     """
     Create an RS256-signed JWT.
@@ -70,6 +72,7 @@ def create_access_token(user_id: uuid.UUID) -> str:
 
 
 # ── User CRUD ─────────────────────────────────────────────────────────────────
+
 
 async def get_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
     """Fetch a single user by email. Returns None if not found."""
@@ -99,7 +102,7 @@ async def create_user(db: AsyncSession, data: UserCreate) -> User:
         hashed_pw=hash_password(data.password),
     )
     db.add(user)
-    await db.flush()   # populate user.id before commit
+    await db.flush()  # populate user.id before commit
     await db.refresh(user)
     logger.info("Created new user id=%s", user.id)
     return user

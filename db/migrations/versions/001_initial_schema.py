@@ -14,6 +14,7 @@ Indexes per Technical Spec:
   idx_orders_user, idx_orders_session
   idx_sessions_user, idx_sessions_status
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -36,8 +37,8 @@ def upgrade() -> None:
             primary_key=True,
             server_default=sa.text("gen_random_uuid()"),
         ),
-        sa.Column("email",      sa.String(255), nullable=False),
-        sa.Column("hashed_pw",  sa.String(255), nullable=False),
+        sa.Column("email", sa.String(255), nullable=False),
+        sa.Column("hashed_pw", sa.String(255), nullable=False),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -46,7 +47,7 @@ def upgrade() -> None:
         ),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default="true"),
     )
-    op.create_index("idx_users_email",  "users",  ["email"],  unique=True)
+    op.create_index("idx_users_email", "users", ["email"], unique=True)
 
     # ── 2. menu_items ─────────────────────────────────────────────────────────
     op.create_table(
@@ -57,11 +58,11 @@ def upgrade() -> None:
             primary_key=True,
             server_default=sa.text("gen_random_uuid()"),
         ),
-        sa.Column("name",      sa.String(255), nullable=False),
-        sa.Column("category",  sa.String(100), nullable=True),
-        sa.Column("price",     sa.Numeric(8, 2), nullable=True),
+        sa.Column("name", sa.String(255), nullable=False),
+        sa.Column("category", sa.String(100), nullable=True),
+        sa.Column("price", sa.Numeric(8, 2), nullable=True),
         sa.Column("modifiers", JSONB, nullable=True),
-        sa.Column("tags",      JSONB, nullable=True),
+        sa.Column("tags", JSONB, nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -106,7 +107,7 @@ def upgrade() -> None:
             nullable=False,
         ),
     )
-    op.create_index("idx_sessions_user",   "sessions", ["user_id"])
+    op.create_index("idx_sessions_user", "sessions", ["user_id"])
     op.create_index("idx_sessions_status", "sessions", ["status"])
 
     # ── 4. orders ─────────────────────────────────────────────────────────────
@@ -130,7 +131,7 @@ def upgrade() -> None:
             sa.ForeignKey("users.id", ondelete="CASCADE"),
             nullable=False,
         ),
-        sa.Column("items",       JSONB,            nullable=False),
+        sa.Column("items", JSONB, nullable=False),
         sa.Column("total_price", sa.Numeric(10, 2), nullable=True),
         sa.Column(
             "status",
@@ -138,7 +139,7 @@ def upgrade() -> None:
             nullable=False,
             server_default="pending",
         ),
-        sa.Column("confidence",  sa.Float(),   nullable=True),
+        sa.Column("confidence", sa.Float(), nullable=True),
         sa.Column(
             "for_review",
             sa.Boolean(),
@@ -158,7 +159,7 @@ def upgrade() -> None:
             nullable=False,
         ),
     )
-    op.create_index("idx_orders_user",    "orders", ["user_id"])
+    op.create_index("idx_orders_user", "orders", ["user_id"])
     op.create_index("idx_orders_session", "orders", ["session_id"])
 
 

@@ -6,6 +6,7 @@ Responsibilities:
   • Calculate total price from assembled items
   • Return paginated order history for a user
 """
+
 import logging
 import uuid
 from typing import Optional, Tuple
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
+
 def _compute_total(items: list) -> float:
     """
     Calculate total order price from assembled JSONB items.
@@ -38,6 +40,7 @@ def _compute_total(items: list) -> float:
 
 
 # ── Core service functions ────────────────────────────────────────────────────
+
 
 async def parse_and_store(
     text: str,
@@ -75,7 +78,7 @@ async def parse_and_store(
         for_review=parsed.for_review,
     )
     db.add(order)
-    await db.flush()       # populate order.id before commit
+    await db.flush()  # populate order.id before commit
     await db.refresh(order)
 
     logger.info(

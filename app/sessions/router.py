@@ -7,6 +7,7 @@ Routes:
   GET    /session/{id}/order      Retrieve current compiled order
   DELETE /session/{id}            Close session + persist final order
 """
+
 import logging
 import uuid
 
@@ -34,6 +35,7 @@ router = APIRouter(prefix="/session")
 
 
 # ── POST /session/start ───────────────────────────────────────────────────────
+
 
 @router.post(
     "/start",
@@ -66,6 +68,7 @@ async def start_session(
 
 
 # ── POST /session/{id}/message ────────────────────────────────────────────────
+
 
 @router.post(
     "/{session_id}/message",
@@ -118,6 +121,7 @@ async def session_message(
 
 # ── GET /session/{id}/order ───────────────────────────────────────────────────
 
+
 @router.get(
     "/{session_id}/order",
     response_model=SessionOrderResponse,
@@ -154,6 +158,7 @@ async def get_order(
 
 
 # ── DELETE /session/{id} ──────────────────────────────────────────────────────
+
 
 @router.delete(
     "/{session_id}",

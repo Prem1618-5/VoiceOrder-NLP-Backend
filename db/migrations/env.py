@@ -11,6 +11,7 @@ schema changes via Base.metadata. The import order must follow FK dependencies:
   3. sessions (FK → users)
   4. orders (FK → users, sessions)
 """
+
 import asyncio
 import os
 import sys
@@ -40,15 +41,16 @@ _db_url = os.environ.get("DATABASE_URL") or config.get_main_option("sqlalchemy.u
 config.set_main_option("sqlalchemy.url", _db_url)
 
 # ── Model discovery — import ALL models so metadata is populated ──────────────
-from db.base import Base             # noqa: E402
-from app.auth.models import User     # noqa: E402, F401
+from db.base import Base  # noqa: E402
+from app.auth.models import User  # noqa: E402, F401
 from app.orders.models import MenuItem, Order  # noqa: E402, F401
-from app.sessions.models import Session        # noqa: E402, F401
+from app.sessions.models import Session  # noqa: E402, F401
 
 target_metadata = Base.metadata
 
 
 # ── Offline mode (generates SQL without connecting) ───────────────────────────
+
 
 def run_migrations_offline() -> None:
     """
@@ -69,6 +71,7 @@ def run_migrations_offline() -> None:
 
 # ── Online mode (async engine) ────────────────────────────────────────────────
 
+
 def _do_run_migrations(connection: Connection) -> None:
     """Synchronous inner function passed to run_sync."""
     context.configure(
@@ -85,7 +88,7 @@ async def run_async_migrations() -> None:
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
-        poolclass=pool.NullPool,   # disposable connection for migrations
+        poolclass=pool.NullPool,  # disposable connection for migrations
     )
     async with connectable.connect() as connection:
         await connection.run_sync(_do_run_migrations)
