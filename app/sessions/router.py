@@ -64,7 +64,12 @@ async def start_session(
         db=db,
         redis=redis,
     )
-    return SessionStartResponse.model_validate(session)
+    return SessionStartResponse(
+        session_id=session.id,
+        status=session.status,
+        created_at=session.created_at,
+        expires_at=session.expires_at,
+    )
 
 
 # ── POST /session/{id}/message ────────────────────────────────────────────────
