@@ -1,4 +1,4 @@
-# Secrets - NEVER commit these
+# ── Secrets — NEVER commit these ──────────────────────────
 .env
 *.pem
 private.pem
@@ -6,7 +6,7 @@ public.pem
 *.key
 *.p12
 
-# Python
+# ── Python ────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
@@ -20,14 +20,14 @@ dist/
 .eggs/
 *.egg
 
-# Virtual environments
+# ── Virtual environments ──────────────────────────────────
 .venv/
 venv/
 env/
 ENV/
 .python-version
 
-# Testing
+# ── Testing ───────────────────────────────────────────────
 .pytest_cache/
 .coverage
 coverage.xml
@@ -35,24 +35,28 @@ htmlcov/
 .tox/
 nosetests.xml
 
-# Type checking
+# ── Type checking ────────────────────────────────────────
 .mypy_cache/
 .dmypy.json
 .pyright/
 
-# IDEs
+# ── IDEs ─────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS artifacts
+# ── OS artifacts ─────────────────────────────────────────
 .DS_Store
 Thumbs.db
 
-# Docker
+# ── Docker ───────────────────────────────────────────────
 .dockerignore
 
-# spaCy model cache (downloaded via Dockerfile)
+# ── spaCy model cache (downloaded via Dockerfile) ────────
 en_core_web_sm/
+
+
+docs/
+.env

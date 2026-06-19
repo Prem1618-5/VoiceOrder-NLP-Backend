@@ -1,121 +1,131 @@
 """
-Monitoring router — no auth required on /health.
+Monitoring router — no JWT required on either endpoint.
 
 Routes:
-  GET /health    — uptime + version check (unlimited rate)
-  GET /metrics   — aggregated Redis counters (10 req/min)
+  GET /health    Uptime, version, DB + Redis connectivity (unlimited)
+  GET /metrics   Aggregated Redis counters — rate-limited 10 req/min
 """
 import logging
 import time
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from redis.asyncio import Redis
+import redis.asyncio as aioredis
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.dependencies import get_db, get_redis, limiter
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Track startup time for uptime calculation
-_START_TIME = time.time()
+_STARTUP_TIME: float = time.time()
+APP_VERSION = "1.0.0"
 
 
-# ── Health ────────────────────────────────────────────────────────────────────
+# ── GET /health ───────────────────────────────────────────────────────────────
 
 @router.get(
     "/health",
-    summary="Service health check",
-    tags=["Monitoring"],
-    responses={200: {"description": "Service healthy"}},
+    summary="Health check — no auth required, unlimited",
+    tags=["monitoring"],
 )
-async def health(
+async def health_check(
     db: AsyncSession = Depends(get_db),
-    redis: Redis = Depends(get_redis),
+    redis: aioredis.Redis = Depends(get_redis),
 ) -> dict:
     """
-    Lightweight liveness + readiness probe.
-    Checks DB + Redis connectivity without exposing internals.
-    Rate: unlimited (for monitoring tools — Data Security spec).
+    Returns overall service health and individual component status.
+    Used by Railway health-check and external monitoring tools.
+    HTTP 200 always — callers should inspect `status` field.
     """
-    db_ok = False
-    redis_ok = False
+    checks: dict = {"db": False, "redis": False}
 
+    # Database connectivity
     try:
         await db.execute(text("SELECT 1"))
-        db_ok = True
+        checks["db"] = True
     except Exception as exc:
-        logger.warning("Health DB check failed: %s", exc)
+        logger.warning("Health check — DB unreachable: %s", exc)
 
+    # Redis connectivity
     try:
         await redis.ping()
-        redis_ok = True
+        checks["redis"] = True
     except Exception as exc:
-        logger.warning("Health Redis check failed: %s", exc)
+        logger.warning("Health check — Redis unreachable: %s", exc)
 
-    uptime_seconds = round(time.time() - _START_TIME, 1)
-
-    status = "healthy" if (db_ok and redis_ok) else "degraded"
+    overall_status = "ok" if all(checks.values()) else "degraded"
+    uptime_seconds = round(time.time() - _STARTUP_TIME, 1)
 
     return {
-        "status": status,
-        "version": settings.APP_VERSION,
-        "environment": settings.ENVIRONMENT,
+        "status": overall_status,
+        "version": APP_VERSION,
         "uptime_seconds": uptime_seconds,
-        "checks": {
-            "database": "ok" if db_ok else "error",
-            "redis": "ok" if redis_ok else "error",
-        },
+        "checks": checks,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
-# ── Metrics ───────────────────────────────────────────────────────────────────
+# ── GET /metrics ──────────────────────────────────────────────────────────────
 
 @router.get(
     "/metrics",
-    summary="Aggregated service metrics from Redis counters",
-    tags=["Monitoring"],
+    summary="Operational metrics (10 req/min, no auth)",
+    tags=["monitoring"],
+    responses={
+        503: {"description": "Redis unavailable — metrics cannot be retrieved"},
+    },
 )
-@limiter.limit("10/minute")   # Data Security spec: 10 req/min
+@limiter.limit("10/minute")
 async def metrics(
     request: Request,
-    redis: Redis = Depends(get_redis),
+    redis: aioredis.Redis = Depends(get_redis),
 ) -> dict:
     """
-    Return aggregated operational metrics from Redis INCR counters.
+    Return aggregated operational metrics sourced from Redis INCR counters.
 
-    Keys (Technical Spec):
-      metrics:orders_today   — total /order/parse calls today
-      metrics:errors_today   — total 5xx errors today
-      metrics:latency_sum    — cumulative processing_time_ms
-      metrics:latency_count  — number of timed requests
+    Counter keys (incremented by the orders router):
+      metrics:orders_today    — total /order/parse calls today
+      metrics:errors_today    — total 5xx responses today
+      metrics:latency_sum     — sum of processing_time_ms across all parses
+      metrics:latency_count   — number of parse calls (denominator for avg)
+      metrics:for_review_today — parses flagged for human review
 
-    Average latency computed server-side.
+    Returns 503 with a safe message if Redis is unavailable
+    (Data Security spec: "Redis timeout → 'Session service unavailable'").
     """
     try:
-        pipe = redis.pipeline()
-        pipe.get("metrics:orders_today")
-        pipe.get("metrics:errors_today")
-        pipe.get("metrics:latency_sum")
-        pipe.get("metrics:latency_count")
-        results = await pipe.execute()
+        orders_today   = int(await redis.get("metrics:orders_today")    or 0)
+        errors_today   = int(await redis.get("metrics:errors_today")    or 0)
+        latency_sum    = float(await redis.get("metrics:latency_sum")   or 0.0)
+        latency_count  = int(await redis.get("metrics:latency_count")   or 0)
+        for_review     = int(await redis.get("metrics:for_review_today") or 0)
+
+        avg_latency_ms = (
+            round(latency_sum / latency_count, 2) if latency_count > 0 else 0.0
+        )
+        error_rate = (
+            round(errors_today / orders_today, 4) if orders_today > 0 else 0.0
+        )
+
+        return {
+            "orders_today": orders_today,
+            "errors_today": errors_today,
+            "for_review_today": for_review,
+            "avg_latency_ms": avg_latency_ms,
+            "error_rate": error_rate,
+            "uptime_seconds": round(time.time() - _STARTUP_TIME, 1),
+        }
+
     except Exception as exc:
-        logger.error("Metrics Redis error: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail="Session service unavailable")
-
-    orders_today = int(results[0] or 0)
-    errors_today = int(results[1] or 0)
-    latency_sum = float(results[2] or 0)
-    latency_count = int(results[3] or 0)
-
-    avg_latency_ms = round(latency_sum / latency_count, 2) if latency_count > 0 else 0.0
-
-    return {
-        "orders_today": orders_today,
-        "errors_today": errors_today,
-        "avg_latency_ms": avg_latency_ms,
-        "total_requests": latency_count,
-        "uptime_seconds": round(time.time() - _START_TIME, 1),
-    }
+        logger.error("Metrics retrieval failed: %s", exc, exc_info=True)
+        # Data Security spec: safe error message, no internals
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": "Session service unavailable",
+                "code": "METRICS_UNAVAILABLE",
+            },
+        )

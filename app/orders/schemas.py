@@ -1,93 +1,77 @@
 """
 Pydantic v2 schemas for the orders module.
 
-Covers:
-  - OrderParseRequest   — POST /order/parse request body
-  - OrderParseResponse  — POST /order/parse response
-  - OrderHistoryItem    — single item in GET /orders/history
-  - OrderHistoryResponse — paginated history wrapper
+OrderParseRequest   → POST /order/parse body
+OrderParseResponse  → POST /order/parse response (includes NLP artefacts)
+OrderSummary        → single item in GET /orders/history list
+PaginatedOrders     → full paginated response for GET /orders/history
 """
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
+
+from app.nlp.schemas import OrderItem, RawEntity
 
 
 # ── Request ───────────────────────────────────────────────────────────────────
 
 class OrderParseRequest(BaseModel):
     """
-    Data Security spec constraints:
+    Request body for POST /order/parse.
+    Constraints (Data Security spec):
       text: min_length=2, max_length=500, strip_whitespace=True
     """
     text: str = Field(
-        ...,
         min_length=2,
         max_length=500,
         strip_whitespace=True,
-        examples=["I want 2 large pepperoni pizzas with extra cheese"],
+        description=(
+            "Free-text restaurant order "
+            "(e.g. 'I want 2 large pepperoni pizzas with extra cheese')"
+        ),
     )
-    menu_id: str = Field(default="default", examples=["default"])
-
-    @field_validator("text")
-    @classmethod
-    def sanitize_control_chars(cls, v: str) -> str:
-        """Strip ASCII control characters — NLP injection defense (Data Security spec)."""
-        import re
-        return re.sub(r"[\x00-\x1F\x7F]", "", v)[:500]
-
-
-# ── Nested response types ─────────────────────────────────────────────────────
-
-class RawEntityOut(BaseModel):
-    text: str
-    label: str
-    start: int
-    end: int
-
-
-class OrderItemOut(BaseModel):
-    name: str
-    quantity: int = Field(ge=1)
-    size: Optional[str] = None
-    modifiers: List[str] = Field(default_factory=list)
-    unit_price: Optional[float] = None
-    matched_menu_item_id: Optional[str] = None
+    menu_id: str = Field(
+        default="default",
+        description="Menu identifier — V1 supports single restaurant per deploy",
+    )
 
 
 # ── Response ──────────────────────────────────────────────────────────────────
 
 class OrderParseResponse(BaseModel):
     """
-    Matches Technical Spec POST /order/parse 200 response schema exactly.
+    Response from POST /order/parse.
+    Matches the Technical Spec response schema exactly.
     """
-    items: List[OrderItemOut]
+    id: uuid.UUID
+    items: List[OrderItem]
     confidence: float = Field(ge=0.0, le=1.0)
     for_review: bool
-    raw_entities: List[RawEntityOut] = Field(default_factory=list)
+    raw_entities: List[RawEntity]
     processing_time_ms: float
 
 
 # ── History ───────────────────────────────────────────────────────────────────
 
-class OrderHistoryItem(BaseModel):
-    """Single order entry in paginated history response."""
+class OrderSummary(BaseModel):
+    """Single order row in paginated history. ORM-compatible via from_attributes."""
     id: uuid.UUID
-    session_id: Optional[uuid.UUID]
+    session_id: Optional[uuid.UUID] = None
     items: List[Dict[str, Any]]
-    total_price: Optional[float]
+    total_price: Optional[float] = None
     status: str
-    confidence: Optional[float]
+    confidence: Optional[float] = None
     for_review: bool
     created_at: datetime
-    updated_at: datetime
 
     model_config = {"from_attributes": True}
 
 
-class OrderHistoryResponse(BaseModel):
-    orders: List[OrderHistoryItem]
+class PaginatedOrders(BaseModel):
+    """Paginated response for GET /orders/history."""
+    items: List[OrderSummary]
+    page: int = Field(ge=1)
+    size: int = Field(ge=1, le=100)
     total: int
-    page: int
-    size: int

@@ -313,22 +313,3 @@ def extract_entities(text: str) -> ParsedOrder:
         raw_entities=raw_entities,
         processing_time_ms=elapsed_ms,
     )
-
-
-class NLPPipeline:
-    """
-    Object wrapper around the 6-step NLP extraction pipeline.
-    Expected by app/orders and app/sessions services and test suite.
-    """
-
-    def __init__(self) -> None:
-        pass
-
-    async def load(self, menu_items: Optional[List[Dict[str, Any]]] = None) -> None:
-        """Load the spaCy model and build custom EntityRuler."""
-        load_model(menu_items)
-
-    def parse(self, text: str) -> ParsedOrder:
-        """Run the full 6-step NLP pipeline on input text."""
-        return extract_entities(text)
-

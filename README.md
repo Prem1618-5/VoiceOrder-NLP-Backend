@@ -1,1073 +1,315 @@
 # VoiceOrder NLP Backend
 
-VoiceOrder NLP Backend is a FastAPI service that converts natural-language restaurant order text into structured JSON. It is built for voice-ordering and conversational ordering systems where an upstream ASR, chatbot, or agent sends text such as:
+A FastAPI service that converts free-text restaurant orders into structured JSON using a 6-step spaCy NLP pipeline. Built for multi-turn voice-order conversations with JWT auth, Redis session state, and PostgreSQL persistence.
 
-```text
-I want 2 large pepperoni pizzas with extra cheese
-```
+---
 
-and receives an API response containing menu items, quantities, sizes, modifiers, confidence, and review flags.
-
-The backend supports two order flows:
-
-- Stateless parsing with `POST /order/parse`
-- Stateful multi-turn ordering with `/session/*` routes and Redis-backed context
-
-## Table Of Contents
-
-- [Core Problem](#core-problem)
-- [Feature Summary](#feature-summary)
-- [Architecture](#architecture)
-- [Technology Stack](#technology-stack)
-- [Repository Structure](#repository-structure)
-- [Runtime Requirements](#runtime-requirements)
-- [Environment Variables](#environment-variables)
-- [Local Setup](#local-setup)
-- [Docker Setup](#docker-setup)
-- [API Usage](#api-usage)
-- [Endpoint Reference](#endpoint-reference)
-- [NLP Pipeline](#nlp-pipeline)
-- [Multi-Turn Sessions](#multi-turn-sessions)
-- [Database Schema](#database-schema)
-- [Testing](#testing)
-- [CI/CD](#cicd)
-- [Deployment](#deployment)
-- [Security Notes](#security-notes)
-- [Known Implementation Notes](#known-implementation-notes)
-- [Troubleshooting](#troubleshooting)
-
-## Core Problem
-
-Restaurant ordering systems often receive informal, spoken-style text:
-
-```text
-can I get two large pepperoni with extra cheese and a coke
-actually make that three
-```
-
-A backend service must turn that text into a reliable order object that downstream systems can validate, price, persist, and eventually send to a POS. This project handles the NLP backend part of that flow.
-
-The service focuses on:
-
-- Extracting food entities from natural-language text.
-- Extracting quantities, sizes, and modifiers.
-- Matching food mentions against a controlled menu vocabulary.
-- Returning confidence scores.
-- Flagging low-confidence outputs for review.
-- Maintaining short-lived multi-turn ordering context.
-- Persisting parsed orders and sessions.
-
-Non-goals for the current version:
-
-- No audio processing or speech-to-text.
-- No frontend dashboard.
-- No payment flow.
-- No POS integration.
-- No multilingual NLP.
-- No model fine-tuning.
-
-## Feature Summary
-
-- FastAPI REST API with Swagger documentation.
-- Async SQLAlchemy models for users, menu items, sessions, and orders.
-- PostgreSQL persistence.
-- Redis-backed session context with 30-minute TTL.
-- JWT auth with RS256 signing.
-- Pydantic request and response validation.
-- spaCy NLP pipeline using `en_core_web_sm`.
-- Custom spaCy `EntityRuler` for menu, size, and modifier entities.
-- RapidFuzz matching against menu names.
-- Confidence scoring with `for_review` flag.
-- Rate limiting via SlowAPI.
-- Dockerfile for containerized deployment.
-- Docker Compose local stack for API, PostgreSQL, and Redis.
-- Pytest suite covering auth, NLP, orders, and sessions.
-
-## Architecture
-
-```mermaid
-flowchart TD
-    Client["Client / cURL / Voice Agent"] -->|"HTTPS + Bearer JWT"| API["FastAPI + Uvicorn"]
-
-    API --> Auth["Auth Router\n/auth/register\n/auth/token"]
-    API --> Orders["Orders Router\n/order/parse\n/orders/history"]
-    API --> Sessions["Sessions Router\n/session/start\n/session/{id}/message"]
-    API --> Monitoring["Monitoring Router\n/health\n/metrics"]
-
-    Auth --> Postgres["PostgreSQL\nusers, orders, sessions, menu_items"]
-    Orders --> NLP["NLP Pipeline\nspaCy + EntityRuler + RapidFuzz"]
-    Orders --> Postgres
-    Sessions --> NLP
-    Sessions --> Redis["Redis\nsession:{uuid} JSON TTL"]
-    Sessions --> Postgres
-    Monitoring --> Postgres
-    Monitoring --> Redis
-```
-
-Request lifecycle for `POST /order/parse`:
-
-1. Client sends natural-language text with a bearer token.
-2. FastAPI validates the request body with Pydantic.
-3. Auth dependency verifies the JWT and loads the current user.
-4. NLP pipeline extracts structured order items.
-5. Result is persisted to PostgreSQL.
-6. API returns structured JSON with confidence and raw entities.
-
-Request lifecycle for `POST /session/{id}/message`:
-
-1. Client starts a session.
-2. Each message is parsed by the NLP pipeline.
-3. Session ownership is verified in PostgreSQL.
-4. Existing session context is loaded from Redis.
-5. New entities are merged into the running order.
-6. Redis context is saved with a refreshed TTL.
-7. Session turn count is synced to PostgreSQL.
-
-## Technology Stack
+## Tech Stack
 
 | Layer | Technology |
-| --- | --- |
-| API framework | FastAPI |
-| ASGI server | Uvicorn |
-| Validation | Pydantic v2 |
-| Settings | pydantic-settings |
-| Auth | python-jose with RS256 JWT |
-| Password hashing | passlib bcrypt |
-| ORM | SQLAlchemy 2 async |
-| Database driver | asyncpg |
-| Database | PostgreSQL |
-| Migrations | Alembic |
-| Session store | Redis |
-| NLP | spaCy `en_core_web_sm` |
-| Custom entities | spaCy EntityRuler |
-| Fuzzy matching | RapidFuzz |
-| Number normalization | word2number |
-| Rate limiting | SlowAPI |
-| Testing | pytest, pytest-asyncio, httpx, pytest-cov |
-| Containerization | Docker, Docker Compose |
-| CI definition | GitHub Actions YAML |
+|---|---|
+| Web Framework | FastAPI 0.111 + Uvicorn |
+| Auth | JWT RS256 (python-jose) + bcrypt (passlib) |
+| NLP | spaCy 3.7 (`en_core_web_sm`) + rapidfuzz + word2number |
+| Database | PostgreSQL 15 (asyncpg + SQLAlchemy 2 async) |
+| Cache / Sessions | Redis 7 (redis-py asyncio) |
+| Migrations | Alembic 1.13 (async engine) |
+| Rate Limiting | slowapi (per-user JWT key or IP fallback) |
+| Validation | Pydantic v2 + pydantic-settings |
+| Testing | pytest-asyncio + httpx ASGI client |
+| Lint | ruff |
+| Deployment | Docker → Railway |
 
-## Repository Structure
+---
 
-```text
-VoiceOrder NLP Backend/
-  app/
-    main.py                 FastAPI app, middleware, routers
-    config.py               Environment-driven settings
-    dependencies.py         DB, Redis, auth, and limiter dependencies
-    auth/
-      models.py             User ORM model
-      router.py             Register and token routes
-      schemas.py            Auth request/response schemas
-      service.py            User creation, password verification, JWT issuing
-    nlp/
-      entity_ruler.py       Default menu and EntityRuler builder
-      pipeline.py           NLP extraction pipeline
-      schemas.py            NLP internal models
-    orders/
-      models.py             MenuItem and Order ORM models
-      router.py             Order parse and history routes
-      schemas.py            Order API schemas
-      service.py            Persistence and history helpers
-    sessions/
-      models.py             Session ORM model
-      router.py             Session API routes
-      schemas.py            Session API schemas
-      service.py            Redis context and merge logic
-    monitoring/
-      router.py             Health and metrics routes
-  db/
-    base.py                 Shared SQLAlchemy declarative base
-    session.py              Async engine and session factory
-  alembic/
-    env.py                  Async Alembic migration environment
-  tests/
-    conftest.py
-    test_auth.py
-    test_nlp.py
-    test_orders.py
-    test_sessions.py
-  .env.example
-  .gitignore
-  alembic.ini
-  ci.yml
-  docker-compose.yml
-  Dockerfile
-  requirements.txt
-  README.md
+## Project Structure
+
+```
+voiceorder/
+├── .env.example                    # env template — copy to .env
+├── .gitignore
+├── alembic.ini                     # points to db/migrations; URL injected at runtime
+├── docker-compose.yml              # local dev: api + postgres + redis
+├── Dockerfile                      # python:3.11-slim, non-root user, spaCy baked in
+├── pytest.ini                      # asyncio_mode=auto, testpaths=tests, cov≥80%
+├── requirements.txt                # pinned deps
+├── .github/
+│   └── workflows/
+│       └── ci.yml                  # lint → test → (Railway auto-deploy on main)
+├── app/
+│   ├── main.py                     # FastAPI app, CORS, rate-limit middleware, routers
+│   ├── config.py                   # pydantic-settings Settings singleton
+│   ├── dependencies.py             # get_db, get_redis, get_current_user, limiter
+│   ├── auth/
+│   │   ├── models.py               # User ORM (id UUID PK, email, hashed_pw, is_active)
+│   │   ├── schemas.py              # RegisterRequest, TokenRequest, UserResponse, TokenResponse
+│   │   ├── service.py              # hash_password, verify_password, create_access_token
+│   │   └── router.py               # POST /auth/register  POST /auth/token
+│   ├── monitoring/
+│   │   └── router.py               # GET /health  GET /metrics
+│   ├── nlp/
+│   │   ├── entity_ruler.py         # spaCy EntityRuler builder + DEFAULT_MENU_ITEMS (50 items)
+│   │   ├── pipeline.py             # extract_entities() — 6-step pipeline
+│   │   └── schemas.py              # ParsedOrder, OrderItem, RawEntity
+│   ├── orders/
+│   │   ├── models.py               # MenuItem, Order ORM (items JSONB, for_review, confidence)
+│   │   ├── schemas.py              # ParseRequest, OrderResponse, HistoryResponse
+│   │   ├── service.py              # _compute_total, persist_order, get_history
+│   │   └── router.py               # POST /order/parse  GET /orders/history
+│   └── sessions/
+│       ├── models.py               # Session ORM (user_id FK, status, turn_count, expires_at)
+│       ├── schemas.py              # SessionStartResponse, MessageRequest, MessageResponse
+│       ├── service.py              # create_session, process_message, close_session (Redis)
+│       └── router.py               # POST /session/start  POST /session/{id}/message
+│                                   # GET  /session/{id}/order  DELETE /session/{id}
+├── db/
+│   ├── base.py                     # SQLAlchemy DeclarativeBase
+│   └── migrations/
+│       ├── env.py                  # async Alembic env; reads DATABASE_URL from env
+│       ├── script.py.mako
+│       └── versions/
+│           └── 001_initial_schema.py  # users → menu_items → sessions → orders
+├── scripts/
+│   └── generate_keys.sh            # openssl RSA 2048 keygen; prints .env instructions
+└── tests/
+    ├── conftest.py                 # fixtures: db_session (rollback), _FakeRedis, client, users
+    ├── test_auth.py                # register, token, JWT lifecycle, protected routes
+    ├── test_nlp.py                 # pipeline unit tests + p95 latency gate + accuracy ≥90%
+    ├── test_orders.py              # /order/parse integration, history pagination, metrics
+    └── test_sessions.py            # multi-turn session flow, user isolation, close → persist
 ```
 
-## Runtime Requirements
+---
 
-For local development without Docker:
+## API Endpoints
 
-- Python 3.11
-- PostgreSQL 15 or compatible
-- Redis 7 or compatible
-- `pip`
-- spaCy model `en_core_web_sm`
+### Auth — `/auth` (rate: 5 req/min, IP-keyed)
 
-For Docker development:
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/auth/register` | ❌ | Create account. Returns 201 with user object. |
+| POST | `/auth/token` | ❌ | Login. Returns RS256 JWT valid for 24h (dev) / 1h (prod). |
 
-- Docker Desktop
-- Docker Compose
+**Register body:** `{ "email": "string", "password": "string (8–72 chars)" }`  
+**Token body:** `{ "email": "string", "password": "string" }`  
+**Token response:** `{ "access_token": "...", "token_type": "bearer" }`
 
-For deployment:
+### Orders — `/order` (rate: 20 req/min, user-keyed)
 
-- PostgreSQL database URL
-- Redis URL
-- RS256 JWT private and public keys
-- Container hosting platform such as Railway, Render, or Fly.io
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/order/parse` | ✅ Bearer | Parse free-text → structured order. Persists to DB. |
+| GET | `/orders/history` | ✅ Bearer | Paginated order history for authenticated user. |
 
-## Environment Variables
-
-Copy the template:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Required variables:
-
-| Variable | Required | Example | Description |
-| --- | --- | --- | --- |
-| `DATABASE_URL` | Yes | `postgresql+asyncpg://dev:dev@localhost:5432/voiceorder` | Async PostgreSQL URL. |
-| `REDIS_URL` | Yes | `redis://localhost:6379` | Redis connection URL. |
-| `JWT_PRIVATE_KEY` | Yes | PEM private key | RS256 signing key. Keep secret. |
-| `JWT_PUBLIC_KEY` | Yes | PEM public key | RS256 verification key. |
-| `ENVIRONMENT` | No | `development` | `development`, `production`, or `test`. |
-| `ACCESS_TOKEN_EXPIRE_HOURS` | No | `24` | JWT lifetime in hours. |
-| `ALLOWED_ORIGINS` | No | `http://localhost:3000,http://localhost:5500` | Comma-separated CORS origins. |
-| `SPACY_MODEL` | No | `en_core_web_sm` | spaCy model name. |
-| `NLP_CONFIDENCE_THRESHOLD` | No | `0.6` | Below this confidence, `for_review=true`. |
-| `FUZZY_SCORE_CUTOFF` | No | `75` | RapidFuzz match threshold. |
-
-Generate JWT keys:
-
-```bash
-openssl genrsa -out private.pem 2048
-openssl rsa -in private.pem -pubout -out public.pem
-```
-
-Then paste the contents into `.env`:
-
-```env
-JWT_PRIVATE_KEY=-----BEGIN RSA PRIVATE KEY-----
-...
------END RSA PRIVATE KEY-----
-
-JWT_PUBLIC_KEY=-----BEGIN PUBLIC KEY-----
-...
------END PUBLIC KEY-----
-```
-
-Never commit `.env`, `.pem`, `.key`, `.p12`, or other secret files.
-
-## Local Setup
-
-### 1. Clone And Enter The Project
-
-```bash
-git clone https://github.com/Prem1618-5/VoiceOrder-NLP-Backend.git
-cd VoiceOrder-NLP-Backend
-```
-
-For the current local workspace:
-
-```powershell
-cd "D:\Development Project\NLP\VoiceOrder NLP Backend"
-```
-
-### 2. Create A Virtual Environment
-
-Windows PowerShell:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-
-macOS/Linux:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-```
-
-### 3. Install Dependencies
-
-```bash
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-python -m spacy download en_core_web_sm
-```
-
-### 4. Configure Environment
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Edit `.env`:
-
-```env
-DATABASE_URL=postgresql+asyncpg://dev:dev@localhost:5432/voiceorder
-REDIS_URL=redis://localhost:6379
-JWT_PRIVATE_KEY=...
-JWT_PUBLIC_KEY=...
-ENVIRONMENT=development
-ACCESS_TOKEN_EXPIRE_HOURS=24
-```
-
-### 5. Run Migrations
-
-```bash
-alembic upgrade head
-```
-
-### 6. Start The API
-
-```bash
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-```
-
-Open:
-
-- Swagger UI: <http://127.0.0.1:8000/docs>
-- ReDoc: <http://127.0.0.1:8000/redoc>
-- OpenAPI JSON: <http://127.0.0.1:8000/openapi.json>
-
-## Docker Setup
-
-Build and run API, PostgreSQL, and Redis:
-
-```bash
-docker compose up --build
-```
-
-Services:
-
-| Service | Container | Port |
-| --- | --- | --- |
-| API | `voiceorder_api` | `8000` |
-| PostgreSQL | `voiceorder_db` | `5432` |
-| Redis | `voiceorder_redis` | `6379` |
-
-The API service uses:
-
-```text
-DATABASE_URL=postgresql+asyncpg://dev:dev@db:5432/voiceorder
-REDIS_URL=redis://redis:6379
-ENVIRONMENT=development
-```
-
-The Dockerfile:
-
-- Uses `python:3.11-slim`.
-- Installs dependencies from `requirements.txt`.
-- Downloads `en_core_web_sm`.
-- Runs the app as a non-root user.
-- Exposes port `8000`.
-- Includes a health check against `/health`.
-
-## API Usage
-
-### Register A User
-
-```bash
-curl -X POST http://127.0.0.1:8000/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"demo@example.com","password":"supersecret123"}'
-```
-
-Response:
-
+**Parse body:** `{ "text": "I want 2 large pepperoni pizzas with extra cheese" }`  
+**Parse response:**
 ```json
 {
-  "id": "7f3396d0-1c7f-4ab3-84f4-743ce603f4e0",
-  "email": "demo@example.com",
-  "created_at": "2026-06-18T10:00:00Z",
-  "is_active": true
-}
-```
-
-### Get A JWT
-
-```bash
-curl -X POST http://127.0.0.1:8000/auth/token \
-  -H "Content-Type: application/json" \
-  -d '{"email":"demo@example.com","password":"supersecret123"}'
-```
-
-Response:
-
-```json
-{
-  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "token_type": "bearer",
-  "expires_in_hours": 24
-}
-```
-
-Use this token:
-
-```bash
-TOKEN="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
-```
-
-PowerShell:
-
-```powershell
-$TOKEN = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
-```
-
-### Parse A Stateless Order
-
-```bash
-curl -X POST http://127.0.0.1:8000/order/parse \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"text":"I want 2 large pepperoni pizzas with extra cheese","menu_id":"default"}'
-```
-
-PowerShell:
-
-```powershell
-$headers = @{
-  Authorization = "Bearer $TOKEN"
-  "Content-Type" = "application/json"
-}
-
-$body = @{
-  text = "I want 2 large pepperoni pizzas with extra cheese"
-  menu_id = "default"
-} | ConvertTo-Json
-
-Invoke-RestMethod `
-  -Method Post `
-  -Uri "http://127.0.0.1:8000/order/parse" `
-  -Headers $headers `
-  -Body $body
-```
-
-Expected response shape:
-
-```json
-{
-  "items": [
-    {
-      "name": "pepperoni pizza",
-      "quantity": 2,
-      "size": "large",
-      "modifiers": ["extra cheese"],
-      "unit_price": 12.99,
-      "matched_menu_item_id": "uuid-or-null"
-    }
-  ],
-  "confidence": 0.94,
+  "id": "uuid",
+  "items": [{"name": "pepperoni pizza", "quantity": 2, "size": "large", "modifiers": ["extra cheese"], "unit_price": 12.99}],
+  "total_price": 25.98,
+  "confidence": 0.87,
   "for_review": false,
-  "raw_entities": [
-    { "text": "2", "label": "CARDINAL", "start": 7, "end": 8 },
-    { "text": "large", "label": "SIZE", "start": 9, "end": 14 },
-    { "text": "pepperoni", "label": "FOOD", "start": 15, "end": 24 }
-  ],
-  "processing_time_ms": 87.2
+  "raw_entities": [{"text": "pepperoni pizza", "label": "FOOD", "start": 12, "end": 27}],
+  "processing_time_ms": 42.3
 }
 ```
 
-### Get Order History
+### Sessions — `/session` (rate: 60 req/min on messages)
 
-```bash
-curl "http://127.0.0.1:8000/orders/history?page=1&size=20" \
-  -H "Authorization: Bearer $TOKEN"
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/session/start` | ✅ Bearer | Create multi-turn session. Returns session_id + expiry. |
+| POST | `/session/{id}/message` | ✅ Bearer | Send utterance; NLP merged with existing order. |
+| GET | `/session/{id}/order` | ✅ Bearer | Read current accumulated order from Redis. |
+| DELETE | `/session/{id}` | ✅ Bearer | Close session; persist final order to DB. |
+
+**Message body:** `{ "text": "string (1–500 chars)" }`  
+**Message response:** `{ "updated_order": {...}, "turn": 3, "context_applied": true }`
+
+> `context_applied: true` means "make that 3" / "add extra cheese" style contextual update occurred.
+
+### Monitoring — no auth required
+
+| Method | Path | Rate | Description |
+|---|---|---|---|
+| GET | `/health` | Unlimited | DB + Redis connectivity check. Always HTTP 200; inspect `status` field. |
+| GET | `/metrics` | 10/min | Aggregated counters from Redis: orders_today, error_rate, avg_latency_ms. |
+
+---
+
+## NLP Pipeline (6 Steps)
+
+```
+Input text
+  │
+  ▼
+Step 1 — Preprocess
+  Strip control chars (\x00–\x1F, \x7F)
+  Hard truncate at 500 chars
+  Lowercase + normalize whitespace
+
+  ▼
+Step 2 — Number normalization
+  word2number: "two large" → "2 large"
+
+  ▼
+Step 3 — spaCy EntityRuler (BEFORE NER)
+  FOOD:     exact + token-level match from 50-item menu
+  SIZE:     small | medium | large | xl | mini | regular
+  MODIFIER: extra | no | without | add | light | double | …
+
+  ▼
+Step 4 — spaCy NER
+  CARDINAL: quantity integers (spaCy built-in)
+  Discards: GPE, ORG, PERSON, LOC, DATE, TIME, MONEY, PERCENT
+
+  ▼
+Step 5 — Entity Assembly
+  qty   ← nearest CARDINAL within 3 tokens of FOOD
+  size  ← SIZE entity within 4 tokens of FOOD
+  mods  ← MODIFIER + following token
+
+  ▼
+Step 6 — Menu Matching (rapidfuzz)
+  fuzz.token_sort_ratio, score_cutoff=75
+  Miss → for_review=true + nearest suggestion
+
+  ▼
+Step 7 — Confidence
+  confidence = (matched_entities / total_entities) × avg(fuzzy_scores)
+  < 0.6 → for_review = true
+  Target: p95 latency < 300 ms
 ```
 
-### Start A Session
-
-```bash
-curl -X POST http://127.0.0.1:8000/session/start \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-Response:
-
-```json
-{
-  "session_id": "4d7ac057-22e3-4f0a-a0a0-7a0fb4751a36",
-  "status": "active",
-  "expires_at": "2026-06-18T10:30:00Z"
-}
-```
-
-### Send A Session Message
-
-```bash
-SESSION_ID="4d7ac057-22e3-4f0a-a0a0-7a0fb4751a36"
-
-curl -X POST "http://127.0.0.1:8000/session/$SESSION_ID/message" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"text":"I want 2 large pepperoni pizzas"}'
-```
-
-Then update the same item:
-
-```bash
-curl -X POST "http://127.0.0.1:8000/session/$SESSION_ID/message" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"text":"actually make that 3"}'
-```
-
-### Get Current Session Order
-
-```bash
-curl "http://127.0.0.1:8000/session/$SESSION_ID/order" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### Close A Session
-
-```bash
-curl -X DELETE "http://127.0.0.1:8000/session/$SESSION_ID" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-Closing a session persists the final order, marks the session as closed, and deletes the Redis context key.
-
-## Endpoint Reference
-
-### Auth
-
-| Method | Path | Auth | Purpose |
-| --- | --- | --- | --- |
-| `POST` | `/auth/register` | Public | Create a user account. |
-| `POST` | `/auth/token` | Public | Authenticate and receive JWT. |
-
-### Orders
-
-| Method | Path | Auth | Purpose |
-| --- | --- | --- | --- |
-| `POST` | `/order/parse` | Required | Parse a natural-language order. |
-| `GET` | `/orders/history` | Required | Get paginated order history. |
-
-### Sessions
-
-| Method | Path | Auth | Purpose |
-| --- | --- | --- | --- |
-| `POST` | `/session/start` | Required | Start a multi-turn session. |
-| `POST` | `/session/{session_id}/message` | Required | Send a message turn. |
-| `GET` | `/session/{session_id}/order` | Required | Get current compiled order. |
-| `DELETE` | `/session/{session_id}` | Required | Close session and persist final order. |
-
-### Monitoring
-
-| Method | Path | Auth | Purpose |
-| --- | --- | --- | --- |
-| `GET` | `/health` | Public | Check DB and Redis connectivity. |
-| `GET` | `/metrics` | Public in current router | Read Redis-backed counters. |
-
-## Request And Response Schemas
-
-### `POST /order/parse`
-
-Request:
-
-```json
-{
-  "text": "I want 2 large pepperoni pizzas with extra cheese",
-  "menu_id": "default"
-}
-```
-
-Validation:
-
-- `text` is required.
-- `text` length must be 2 to 500 characters.
-- ASCII control characters are stripped.
-- `menu_id` defaults to `default`.
-
-Response:
-
-```json
-{
-  "items": [
-    {
-      "name": "pepperoni pizza",
-      "quantity": 2,
-      "size": "large",
-      "modifiers": ["extra cheese"],
-      "unit_price": 12.99,
-      "matched_menu_item_id": "uuid-or-null"
-    }
-  ],
-  "confidence": 0.94,
-  "for_review": false,
-  "raw_entities": [
-    {
-      "text": "pepperoni",
-      "label": "FOOD",
-      "start": 15,
-      "end": 24
-    }
-  ],
-  "processing_time_ms": 87.2
-}
-```
-
-### `POST /session/{session_id}/message`
-
-Request:
-
-```json
-{
-  "text": "actually make that 3"
-}
-```
-
-Response:
-
-```json
-{
-  "updated_order": {
-    "items": [
-      {
-        "name": "pepperoni pizza",
-        "quantity": 3,
-        "size": "large",
-        "modifiers": [],
-        "unit_price": 12.99,
-        "matched_menu_item_id": "uuid-or-null"
-      }
-    ],
-    "total_price": 38.97
-  },
-  "turn": 2,
-  "context_applied": true
-}
-```
-
-## NLP Pipeline
-
-The extraction pipeline is implemented in `app/nlp/pipeline.py`.
-
-```mermaid
-flowchart LR
-    A["Raw text"] --> B["Preprocess"]
-    B --> C["Normalize numbers"]
-    C --> D["spaCy EntityRuler"]
-    D --> E["spaCy NER"]
-    E --> F["Entity assembly"]
-    F --> G["RapidFuzz menu match"]
-    G --> H["Confidence score"]
-    H --> I["Parsed order"]
-```
-
-Pipeline steps:
-
-1. Preprocess text by removing control characters, truncating at 500 characters, lowercasing, and normalizing whitespace.
-2. Normalize written numbers with `word2number`, for example `two` to `2`.
-3. Run a spaCy `EntityRuler` before NER.
-4. Extract allowed entity labels: `FOOD`, `SIZE`, `MODIFIER`, `CARDINAL`.
-5. Discard irrelevant labels such as `GPE`, `ORG`, `PERSON`, `DATE`, `TIME`, `MONEY`, and `PERCENT`.
-6. Assemble raw entities into order items.
-7. Fuzzy-match item names against the menu with RapidFuzz.
-8. Compute confidence.
-9. Set `for_review=true` when confidence is below threshold or menu matching fails.
-
-Entity rules:
-
-- `FOOD` comes from the synthetic menu vocabulary in `app/nlp/entity_ruler.py`.
-- `SIZE` includes values such as `small`, `medium`, `large`, `xl`, `regular`, and `mini`.
-- `MODIFIER` includes values such as `extra`, `no`, `without`, `add`, `light`, `double`, and `triple`.
-- `CARDINAL` comes from spaCy NER and normalized numeric text.
-
-Example default menu categories:
-
-- Pizza
-- Burgers
-- Sides
-- Drinks
-- Pasta
-- Salads
-- Sandwiches
-- Wings
-- Desserts
-- Breakfast
-- Wraps
-- Soups
-- Shakes
-
-Confidence is calculated from entity coverage and fuzzy scores:
-
-```text
-confidence = entity_ratio * average_fuzzy_score
-```
-
-## Multi-Turn Sessions
-
-Sessions are stored in PostgreSQL and active context is stored in Redis:
-
-```text
-session:{session_id}
-```
-
-Redis context shape:
-
-```json
-{
-  "session_id": "uuid",
-  "user_id": "uuid",
-  "turn": 3,
-  "current_order": {
-    "items": [
-      {
-        "name": "pepperoni pizza",
-        "quantity": 3,
-        "size": "large",
-        "modifiers": ["extra cheese"],
-        "unit_price": 12.99,
-        "matched_menu_item_id": "uuid"
-      }
-    ],
-    "total_price": 38.97
-  },
-  "last_food_entity": "pepperoni pizza",
-  "conversation": [
-    {
-      "turn": 1,
-      "input": "I want 2 large pepperoni pizzas",
-      "entities": []
-    }
-  ]
-}
-```
-
-Merge behavior:
-
-- New food item: append to current order.
-- Existing food item: update quantity, size, or modifiers.
-- Quantity-only update such as `actually make that 3`: update the last food entity.
-- Redis TTL is reset after each session message.
-- Session ownership is verified in PostgreSQL before Redis context is read.
+---
 
 ## Database Schema
 
-### `users`
+```sql
+users       (id UUID PK, email VARCHAR UNIQUE, hashed_pw, created_at, is_active BOOL)
+menu_items  (id UUID PK, name, category, price NUMERIC, modifiers JSONB, tags JSONB, created_at)
+sessions    (id UUID PK, user_id FK→users, status VARCHAR(20), turn_count INT,
+             created_at, expires_at DEFAULT now()+30min)
+orders      (id UUID PK, session_id FK→sessions nullable, user_id FK→users,
+             items JSONB, total_price NUMERIC, status VARCHAR(20),
+             confidence FLOAT, for_review BOOL, created_at, updated_at)
 
-| Column | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | Primary key. |
-| `email` | VARCHAR(255) | Unique user email. |
-| `hashed_pw` | VARCHAR(255) | Bcrypt password hash. |
-| `created_at` | TIMESTAMP | Creation timestamp. |
-| `is_active` | BOOLEAN | Active user flag. |
-
-### `menu_items`
-
-| Column | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | Primary key. |
-| `name` | VARCHAR(255) | Menu item name. |
-| `category` | VARCHAR(100) | Item category. |
-| `price` | NUMERIC(8,2) | Item price. |
-| `modifiers` | JSONB | Allowed modifiers. |
-| `tags` | JSONB | Item tags. |
-| `created_at` | TIMESTAMP | Creation timestamp. |
-
-### `sessions`
-
-| Column | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | Primary key. |
-| `user_id` | UUID | Owner user id. |
-| `status` | VARCHAR(20) | `active` or `closed`. |
-| `turn_count` | INT | Processed message count. |
-| `created_at` | TIMESTAMP | Creation timestamp. |
-| `expires_at` | TIMESTAMP | Session expiration timestamp. |
-
-### `orders`
-
-| Column | Type | Description |
-| --- | --- | --- |
-| `id` | UUID | Primary key. |
-| `session_id` | UUID | Optional session id. |
-| `user_id` | UUID | Owner user id. |
-| `items` | JSONB | Parsed order items. |
-| `total_price` | NUMERIC(10,2) | Computed total price. |
-| `status` | VARCHAR(20) | `pending`, `confirmed`, or `cancelled`. |
-| `confidence` | FLOAT | NLP confidence. |
-| `for_review` | BOOLEAN | Low-confidence review flag. |
-| `created_at` | TIMESTAMP | Creation timestamp. |
-| `updated_at` | TIMESTAMP | Last update timestamp. |
-
-## Rate Limits
-
-| Route | Limit |
-| --- | --- |
-| `POST /auth/token` | 5 requests/minute |
-| `POST /order/parse` | 20 requests/minute |
-| `POST /session/{session_id}/message` | 60 requests/minute |
-| `GET /metrics` | 10 requests/minute |
-| `GET /health` | No explicit limit |
-
-## Monitoring
-
-### `GET /health`
-
-The health endpoint checks:
-
-- PostgreSQL connectivity with `SELECT 1`.
-- Redis connectivity with `PING`.
-
-Expected shape:
-
-```json
-{
-  "status": "healthy",
-  "version": "1.0.0",
-  "environment": "development",
-  "uptime_seconds": 120.5,
-  "checks": {
-    "database": "ok",
-    "redis": "ok"
-  }
-}
+Indexes: idx_users_email (unique), idx_orders_user, idx_orders_session,
+         idx_sessions_user, idx_sessions_status, idx_menu_items_name
 ```
 
-### `GET /metrics`
+---
 
-The metrics endpoint reads Redis counters:
+## Redis Schema
 
-- `metrics:orders_today`
-- `metrics:errors_today`
-- `metrics:latency_sum`
-- `metrics:latency_count`
+| Key | Type | TTL | Content |
+|---|---|---|---|
+| `session:{uuid}` | JSON string | 1800s (reset on each message) | `{session_id, user_id, turn, current_order, last_food_entity, conversation[]}` |
+| `metrics:orders_today` | INCR counter | none | Total `/order/parse` calls today |
+| `metrics:errors_today` | INCR counter | none | Total 5xx responses today |
+| `metrics:latency_sum` | INCRBY counter | none | Sum of processing_time_ms |
+| `metrics:latency_count` | INCR counter | none | Parse call count (denominator) |
+| `metrics:for_review_today` | INCR counter | none | Parses flagged for review |
 
-Expected shape:
+Session TTL is **reset on every message** — idle timeout semantics.  
+Session ownership is validated against JWT `sub` on every Redis read/write — no cross-user access.
 
-```json
-{
-  "orders_today": 14,
-  "errors_today": 0,
-  "avg_latency_ms": 92.4,
-  "total_requests": 14,
-  "uptime_seconds": 120.5
-}
-```
+---
 
-## Testing
+## Environment Variables
 
-Run all tests:
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `DATABASE_URL` | ✅ | — | `postgresql+asyncpg://user:pw@host:5432/db` |
+| `REDIS_URL` | ✅ | — | `redis://user:pw@host:6379` |
+| `JWT_PRIVATE_KEY` | ✅ | — | Full PEM string for RS256 signing |
+| `JWT_PUBLIC_KEY` | ✅ | — | Full PEM string for RS256 verification |
+| `ENVIRONMENT` | ✅ | `development` | `development` \| `production` \| `test` |
+| `ACCESS_TOKEN_EXPIRE_HOURS` | ❌ | `24` | JWT TTL in hours |
+| `ALLOWED_ORIGINS` | ❌ | `http://localhost:3000,...` | Comma-separated CORS origins |
+| `SPACY_MODEL` | ❌ | `en_core_web_sm` | spaCy model name |
+| `NLP_CONFIDENCE_THRESHOLD` | ❌ | `0.6` | Below this → `for_review=true` |
+| `FUZZY_SCORE_CUTOFF` | ❌ | `75` | rapidfuzz score_cutoff (0–100) |
+
+---
+
+## Quick Start (Docker)
 
 ```bash
+# 1. Copy env template
+cp .env.example .env
+
+# 2. Generate RS256 keys and paste into .env
+bash scripts/generate_keys.sh
+
+# 3. Start all services (api + postgres + redis)
+docker compose up --build
+
+# 4. Run migrations (separate terminal)
+docker compose exec api alembic upgrade head
+
+# 5. Verify
+curl http://localhost:8000/health
+# → {"status":"ok","checks":{"db":true,"redis":true},...}
+```
+
+Swagger UI: http://localhost:8000/docs  
+ReDoc: http://localhost:8000/redoc
+
+---
+
+## Running Tests
+
+Tests use an in-memory `_FakeRedis` (no external Redis needed) and a real test PostgreSQL database. All transactions are rolled back after each test.
+
+```bash
+# Requires: PostgreSQL at localhost:5432 with DB voiceorder_test (user: test, pw: test)
+# Keys are auto-generated per test session — no .env needed for tests
+
 pytest tests/ -v
-```
+# Coverage threshold: 80% (fails below)
 
-Run with coverage:
-
-```bash
-pytest tests/ --cov=app --cov-report=term-missing
-```
-
-Require 80 percent coverage:
-
-```bash
-pytest tests/ --cov=app --cov-report=term-missing --cov-fail-under=80
-```
-
-Run individual test files:
-
-```bash
-pytest tests/test_auth.py -v
+# Single module
 pytest tests/test_nlp.py -v
+pytest tests/test_auth.py -v
 pytest tests/test_orders.py -v
 pytest tests/test_sessions.py -v
 ```
 
-## Linting
+CI runs the full suite on every push (GitHub Actions: `.github/workflows/ci.yml`).
 
-The CI definition uses Ruff:
+---
 
-```bash
-ruff check app/ tests/
-ruff format --check app/ tests/
-```
+## Deployment (Railway)
 
-Format files:
+Railway auto-deploys on push to `main` via GitHub integration.
 
-```bash
-ruff format app/ tests/
-```
+1. Create a Railway project; connect your GitHub repo.
+2. Add PostgreSQL plugin and Redis plugin from Railway dashboard.
+3. Set environment variables in Railway → Variables:
+   - `DATABASE_URL` (auto-set by Railway PostgreSQL plugin as `${{Postgres.DATABASE_URL}}`)
+   - `REDIS_URL` (auto-set by Railway Redis plugin)
+   - `JWT_PRIVATE_KEY` — paste full PEM (multi-line accepted)
+   - `JWT_PUBLIC_KEY` — paste full PEM
+   - `ENVIRONMENT=production`
+   - `ACCESS_TOKEN_EXPIRE_HOURS=1`
+   - `ALLOWED_ORIGINS=https://your-frontend.vercel.app`
+4. Set start command: `alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+5. Railway runs the Dockerfile automatically. Health check: `GET /health`.
 
-## CI/CD
+---
 
-The repository includes `ci.yml` with jobs for:
+## Key Design Decisions
 
-- Ruff linting.
-- Ruff formatting check.
-- PostgreSQL service for tests.
-- Redis service for tests.
-- Dependency installation.
-- spaCy model download.
-- Alembic migration run.
-- Pytest with coverage threshold.
-- Placeholder security review gate.
+**RS256 over HS256** — asymmetric JWT means the public key can be distributed to verify tokens without exposing the signing secret. Required for any microservice architecture.
 
-For GitHub Actions to run automatically, the workflow file should be placed at:
+**Redis for session state** — PostgreSQL stores session metadata and final orders; Redis holds live conversation context (turn history, accumulated order). 30-minute TTL reset on each message provides idle-timeout semantics without a cron job.
 
-```text
-.github/workflows/ci.yml
-```
+**EntityRuler before NER** — spaCy's EntityRuler runs before the statistical NER so menu vocabulary takes priority over spaCy's default classifications. `overwrite_ents=True` ensures custom FOOD labels win.
 
-## Deployment
+**FakeRedis in tests** — avoids a Redis instance for unit/integration tests. All 5 methods used by the app (`get`, `set`, `delete`, `incr`, `incrby`) are implemented as an in-memory dict.
 
-Suggested deployment flow:
+**`for_review` flag** — orders with confidence < 0.6 or any fuzzy-match miss are flagged. This surfaces ambiguous orders to staff without blocking the API response.
 
-1. Push repository to GitHub.
-2. Provision PostgreSQL, for example Supabase.
-3. Provision Redis, for example Upstash.
-4. Create a Railway/Render/Fly.io app from the GitHub repository.
-5. Set environment variables in the hosting dashboard.
-6. Deploy the Dockerfile.
-7. Run Alembic migrations against production DB.
-8. Verify `/health`.
-9. Verify `/docs`.
-10. Register a test user and call `/order/parse`.
-
-Production-style environment:
-
-```env
-DATABASE_URL=postgresql+asyncpg://...
-REDIS_URL=redis://...
-JWT_PRIVATE_KEY=...
-JWT_PUBLIC_KEY=...
-ENVIRONMENT=production
-ACCESS_TOKEN_EXPIRE_HOURS=1
-ALLOWED_ORIGINS=https://your-frontend.example
-SPACY_MODEL=en_core_web_sm
-NLP_CONFIDENCE_THRESHOLD=0.6
-FUZZY_SCORE_CUTOFF=75
-```
-
-## Security Notes
-
-Implemented or intended security practices:
-
-- `.env` and key files are ignored by Git.
-- JWTs use RS256 asymmetric signing.
-- Passwords are stored as bcrypt hashes.
-- Protected routes use `Authorization: Bearer <JWT>`.
-- Pydantic validates request bodies.
-- Order text is length-limited and has control characters stripped.
-- Production CORS uses explicit allowed origins.
-- Session ownership is checked before Redis context access.
-- Global exception handling avoids exposing internal tracebacks.
-- Docker container runs as a non-root user.
-
-Important rule:
-
-```text
-Never commit .env, PEM files, private keys, database passwords, Redis passwords, or platform tokens.
-```
-
-## Known Implementation Notes
-
-Before treating the project as production-ready, check these items:
-
-1. `GET /health` references `settings.APP_VERSION`, but `APP_VERSION` is not currently defined in `app/config.py`. Add `APP_VERSION: str = "1.0.0"` or adjust the health route.
-2. `ci.yml` is a valid workflow definition, but GitHub Actions expects it under `.github/workflows/ci.yml`.
-3. The current tree has Alembic configuration, but no visible committed migration file under `alembic/versions/`. Generate and commit an initial migration before a clean deployment.
-4. The menu vocabulary currently comes from the in-code synthetic menu in `app/nlp/entity_ruler.py`. Loading menu patterns from the `menu_items` table is a natural next improvement.
-5. `/metrics` reads Redis metric keys, but request paths must consistently increment those counters for metrics to be meaningful.
-6. Some source comments contain mojibake from earlier encoding issues. Runtime behavior is unaffected, but comments should be cleaned for readability.
-
-## Troubleshooting
-
-### spaCy model not found
-
-```bash
-python -m spacy download en_core_web_sm
-```
-
-### Database connection fails
-
-Check:
-
-- `DATABASE_URL` is set.
-- PostgreSQL is running.
-- The URL uses `postgresql+asyncpg://`.
-- Host is correct: `localhost` from host machine, `db` from Docker API container.
-
-### Redis connection fails
-
-Check:
-
-- `REDIS_URL` is set.
-- Redis is running.
-- Host is correct: `localhost` from host machine, `redis` from Docker API container.
-
-### JWT validation fails
-
-Check:
-
-- Private and public keys are a matching pair.
-- PEM line breaks are preserved.
-- API was restarted after changing `.env`.
-- Token has not expired.
-
-### `401` on protected routes
-
-Check:
-
-- Header is present.
-- Header value is exactly `Bearer <token>`.
-- Token came from `/auth/token`.
-
-### `429 Too Many Requests`
-
-You hit a configured rate limit. Wait for the window to reset or reduce request frequency.
-
-### Alembic fails
-
-Check:
-
-- `DATABASE_URL` points to a live PostgreSQL database.
-- Database user has schema creation permissions.
-- A migration exists under `alembic/versions/`.
-
-## End-To-End Smoke Test
-
-After the API is running:
-
-```bash
-curl -X POST http://127.0.0.1:8000/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"demo@example.com","password":"supersecret123"}'
-
-curl -X POST http://127.0.0.1:8000/auth/token \
-  -H "Content-Type: application/json" \
-  -d '{"email":"demo@example.com","password":"supersecret123"}'
-```
-
-Copy the returned `access_token`, then:
-
-```bash
-curl -X POST http://127.0.0.1:8000/order/parse \
-  -H "Authorization: Bearer YOUR_TOKEN_HERE" \
-  -H "Content-Type: application/json" \
-  -d '{"text":"I want 2 large pepperoni pizzas with extra cheese","menu_id":"default"}'
-```
-
-Expected result:
-
-- HTTP `200`.
-- At least one parsed item.
-- `name` similar to `pepperoni pizza`.
-- `quantity` equal to `2`.
-- `size` equal to `large`.
-- `for_review=false` when extraction confidence is high.
-
-## License
-
-No license file is currently included. Add a `LICENSE` file before distributing the project publicly or accepting external contributions.
+**No internal details in error responses** — all unhandled exceptions log full tracebacks to structured logs but return `{"detail": "Internal error", "code": "INTERNAL_ERROR"}` to clients.

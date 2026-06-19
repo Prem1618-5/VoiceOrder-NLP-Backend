@@ -2,107 +2,95 @@
 Orders router.
 
 Routes:
-  POST /order/parse       — NLP parse, stateless, persists result
-  GET  /orders/history    — paginated history for current user
+  POST /order/parse       NLP parse + persist (JWT required, 20 req/min)
+  GET  /orders/history    Paginated order history (JWT required)
 """
 import logging
-import time
-import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+import redis.asyncio as aioredis
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
-from app.dependencies import get_current_user, get_db, limiter
-from app.nlp.pipeline import NLPPipeline
-from app.orders.schemas import (
-    OrderHistoryItem,
-    OrderHistoryResponse,
-    OrderParseRequest,
-    OrderParseResponse,
-)
-from app.orders.service import get_order_history, get_pipeline, persist_order
+from app.dependencies import get_current_user, get_db, get_redis, limiter
+from app.orders.schemas import OrderParseRequest, OrderParseResponse, PaginatedOrders
+from app.orders.service import get_history, parse_and_store
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# ── Parse ─────────────────────────────────────────────────────────────────────
+# ── POST /order/parse ─────────────────────────────────────────────────────────
 
 @router.post(
     "/order/parse",
     response_model=OrderParseResponse,
-    summary="Parse a natural-language order into structured JSON",
+    status_code=200,
+    summary="Parse a free-text order via NLP",
     responses={
         401: {"description": "Missing or invalid JWT"},
-        422: {"description": "Pydantic validation error"},
-        429: {"description": "Rate limit exceeded"},
+        422: {"description": "Validation error — text too short/long"},
+        429: {"description": "Rate limit exceeded (20 req/min per user)"},
     },
 )
-@limiter.limit("20/minute")   # Data Security spec: 20 req/min per JWT sub
+@limiter.limit("20/minute")
 async def parse_order(
-    request: Request,           # required by slowapi
+    request: Request,                           # required by slowapi
     body: OrderParseRequest,
-    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: aioredis.Redis = Depends(get_redis),
 ) -> OrderParseResponse:
     """
-    Run the 6-step NLP pipeline on the provided text.
+    Parse a free-text restaurant order into structured JSON.
 
-    - Extracts FOOD / SIZE / MODIFIER / CARDINAL entities
-    - Fuzzy-matches against menu_items table (rapidfuzz, cutoff=75)
-    - Scores confidence; sets for_review=True when confidence < 0.6
-    - Persists order to PostgreSQL
-    - Returns structured JSON matching Technical Spec response schema
+    **Rate limit:** 20 requests / minute per authenticated user.
 
-    Rate limit: **20 requests / minute per authenticated user**.
+    **Example:**
+    ```
+    POST /order/parse
+    { "text": "I want 2 large pepperoni pizzas with extra cheese" }
+    ```
+
+    **Response includes:**
+    - `items` — structured line-items with name, qty, size, modifiers, price
+    - `confidence` — 0.0–1.0 score
+    - `for_review` — true when confidence < 0.6
+    - `raw_entities` — spaCy entity spans for debugging
+    - `processing_time_ms` — end-to-end NLP latency
     """
-    pipeline: NLPPipeline = get_pipeline()
+    order, parsed = await parse_and_store(
+        text=body.text,
+        user_id=current_user.id,
+        db=db,
+    )
 
-    t0 = time.perf_counter()
+    # Best-effort metric instrumentation — never fail the request on Redis error
     try:
-        parsed = pipeline.parse(body.text)
-    except Exception as exc:
-        logger.error("NLP pipeline error: %s", exc, exc_info=True)
-        # Data Security spec: no internals in 4xx/5xx responses
-        raise HTTPException(status_code=500, detail="Unable to process request")
-
-    # Persist — session_id is None for stateless parse (sessions attach their own)
-    try:
-        await persist_order(db, parsed, current_user.id, session_id=None)
-        await db.commit()
-    except Exception as exc:
-        logger.error("Order persist error: %s", exc, exc_info=True)
-        await db.rollback()
-        raise HTTPException(status_code=500, detail="Service temporarily unavailable")
-
-    elapsed_ms = (time.perf_counter() - t0) * 1000
+        await redis.incr("metrics:orders_today")
+        await redis.incrby("metrics:latency_sum", int(parsed.processing_time_ms))
+        await redis.incr("metrics:latency_count")
+        if parsed.for_review:
+            await redis.incr("metrics:for_review_today")
+    except Exception:
+        pass
 
     return OrderParseResponse(
-        items=[
-            {
-                "name": item.name,
-                "quantity": item.quantity,
-                "size": item.size,
-                "modifiers": item.modifiers,
-                "unit_price": item.unit_price,
-                "matched_menu_item_id": item.matched_menu_item_id,
-            }
-            for item in parsed.items
-        ],
+        id=order.id,
+        items=parsed.items,
         confidence=parsed.confidence,
         for_review=parsed.for_review,
-        raw_entities=[e.model_dump() for e in parsed.raw_entities],
-        processing_time_ms=round(elapsed_ms, 2),
+        raw_entities=parsed.raw_entities,
+        processing_time_ms=parsed.processing_time_ms,
     )
 
 
-# ── History ───────────────────────────────────────────────────────────────────
+# ── GET /orders/history ───────────────────────────────────────────────────────
 
 @router.get(
     "/orders/history",
-    response_model=OrderHistoryResponse,
-    summary="Get paginated order history for the current user",
+    response_model=PaginatedOrders,
+    summary="Paginated order history for the current user",
     responses={
         401: {"description": "Missing or invalid JWT"},
     },
@@ -110,24 +98,16 @@ async def parse_order(
 async def order_history(
     page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
     size: int = Query(default=20, ge=1, le=100, description="Items per page (max 100)"),
-    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> OrderHistoryResponse:
+    db: AsyncSession = Depends(get_db),
+) -> PaginatedOrders:
     """
-    Return paginated order history for the authenticated user.
-    Results are sorted newest-first.
-
-    Pagination caps: page≥1, size≤100 (Data Security spec).
+    Return paginated history of parsed orders for the authenticated user.
+    Orders are sorted most-recent-first.
     """
-    try:
-        orders, total = await get_order_history(db, current_user.id, page, size)
-    except Exception as exc:
-        logger.error("History fetch error: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail="Service temporarily unavailable")
-
-    return OrderHistoryResponse(
-        orders=[OrderHistoryItem.model_validate(o) for o in orders],
-        total=total,
+    return await get_history(
+        user_id=current_user.id,
         page=page,
         size=size,
+        db=db,
     )
