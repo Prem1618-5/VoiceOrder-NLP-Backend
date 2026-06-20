@@ -68,7 +68,6 @@ get_settings.cache_clear()
 # ── Step 4 — all remaining imports ───────────────────────────────────────────
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
-from asgi_lifespan import LifespanManager  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy.ext.asyncio import (  # noqa: E402
     AsyncSession,
@@ -206,12 +205,11 @@ async def client(db_session: AsyncSession, mock_redis: _FakeRedis) -> AsyncClien
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_redis] = _override_get_redis
 
-    async with LifespanManager(app) as manager:
-        async with AsyncClient(
-            transport=ASGITransport(app=manager.app),
-            base_url="http://test",
-        ) as ac:
-            yield ac
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as ac:
+        yield ac
 
     app.dependency_overrides.clear()
 

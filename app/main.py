@@ -21,7 +21,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.config import settings
-from app.dependencies import limiter, init_db, close_db
+from app.dependencies import limiter
 from app.auth.router import router as auth_router
 from app.monitoring.router import router as monitoring_router
 from app.orders.router import router as orders_router
@@ -41,9 +41,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application startup / shutdown lifecycle hooks."""
     logger.info("VoiceOrder NLP Backend starting — env=%s", settings.ENVIRONMENT)
-    await init_db()
     yield
-    await close_db()
     logger.info("VoiceOrder NLP Backend shutting down")
 
 
