@@ -269,7 +269,7 @@ Tests use an in-memory `_FakeRedis` (no external Redis needed) and a real test P
 
 pytest tests/ -v
 # Coverage threshold: 80% (fails below)
-
+# Testing every single module
 # Single module
 pytest tests/test_nlp.py -v
 pytest tests/test_auth.py -v
