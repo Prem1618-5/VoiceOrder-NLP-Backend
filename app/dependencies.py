@@ -61,20 +61,31 @@ limiter = Limiter(key_func=_rate_limit_key)
 
 # ── Async SQLAlchemy engine + session factory ─────────────────────────────────
 
-_engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=not settings.is_production,  # log SQL in dev / test only
-    pool_size=10,
-    max_overflow=5,
-    pool_pre_ping=True,  # recycle dead connections
-    pool_timeout=30,
-)
+_engine = None
+_AsyncSessionLocal = None
 
-_AsyncSessionLocal = async_sessionmaker(
-    _engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+
+async def init_db():
+    global _engine, _AsyncSessionLocal
+    _engine = create_async_engine(
+        settings.DATABASE_URL,
+        echo=not settings.is_production,  # log SQL in dev / test only
+        pool_size=10,
+        max_overflow=5,
+        pool_pre_ping=True,  # recycle dead connections
+        pool_timeout=30,
+    )
+    _AsyncSessionLocal = async_sessionmaker(
+        _engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+
+async def close_db():
+    global _engine
+    if _engine is not None:
+        await _engine.dispose()
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -82,6 +93,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     Yield a transactional async DB session.
     Commits on clean exit, rolls back on exception.
     """
+    if _AsyncSessionLocal is None:
+        raise RuntimeError("Database not initialized")
     async with _AsyncSessionLocal() as session:
         try:
             yield session
