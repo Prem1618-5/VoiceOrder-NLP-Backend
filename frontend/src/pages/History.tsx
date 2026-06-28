@@ -58,9 +58,7 @@ export default function History() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search by item or order ID"
-              className="w-full pl-4 pr-10 py-2.5 border border-[#E2E8F0] rounded-lg text-sm
-                         text-[#111827] placeholder:text-[#6B7280] focus:outline-none
-                         focus:ring-2 focus:ring-[#6366F1] focus:border-transparent"
+              className="form-input pr-10"
             />
             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6B7280]">
               🔍
@@ -78,8 +76,7 @@ export default function History() {
               setPageSize(Number(e.target.value));
               setPage(1);
             }}
-            className="border border-[#E2E8F0] rounded-lg px-3 py-2 text-sm text-[#111827]
-                       focus:outline-none focus:ring-2 focus:ring-[#6366F1]"
+            className="form-input w-auto py-1.5"
           >
             <option value={10}>Show: 10</option>
             <option value={20}>Show: 20</option>
@@ -116,8 +113,7 @@ export default function History() {
           </p>
           <button
             onClick={() => navigate('/parse')}
-            className="bg-[#6366F1] hover:bg-[#4F46E5] text-white rounded-lg px-6 py-2.5
-                       font-medium text-sm transition-colors"
+            className="btn-primary px-6 py-2.5"
           >
             Go to Parser →
           </button>
@@ -135,8 +131,7 @@ export default function History() {
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page <= 1}
-            className="px-3 py-1.5 text-sm text-[#6B7280] border border-[#E2E8F0] rounded-lg
-                       hover:bg-[#F8FAFC] disabled:opacity-40 disabled:cursor-not-allowed"
+            className="btn-ghost !py-1.5"
           >
             ← Prev
           </button>
@@ -147,11 +142,11 @@ export default function History() {
               <button
                 key={pageNum}
                 onClick={() => setPage(pageNum)}
-                className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+                className={
                   page === pageNum
-                    ? 'bg-[#6366F1] text-white border-[#6366F1]'
-                    : 'text-[#6B7280] border-[#E2E8F0] hover:bg-[#F8FAFC]'
-                }`}
+                    ? 'btn-primary !px-3 !py-1.5'
+                    : 'btn-ghost !px-3 !py-1.5'
+                }
               >
                 {pageNum}
               </button>
@@ -165,8 +160,7 @@ export default function History() {
           <button
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page >= totalPages}
-            className="px-3 py-1.5 text-sm text-[#6B7280] border border-[#E2E8F0] rounded-lg
-                       hover:bg-[#F8FAFC] disabled:opacity-40 disabled:cursor-not-allowed"
+            className="btn-ghost !py-1.5"
           >
             Next →
           </button>

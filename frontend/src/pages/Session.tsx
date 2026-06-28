@@ -46,16 +46,14 @@ export default function Session() {
       <div className="flex-1 flex gap-4 mt-4 min-h-0">
         {/* Controls (left) */}
         <div className="w-[200px] shrink-0 hidden lg:block">
-          <div className="bg-white border border-[#E2E8F0] rounded-xl p-4 space-y-4">
+          <div className="glass-card p-4 space-y-4">
             <button
               onClick={async () => {
                 session.reset();
                 await session.start();
               }}
               disabled={session.isLoading}
-              className="w-full bg-[#6366F1] hover:bg-[#4F46E5] text-white rounded-lg py-2.5
-                         font-medium text-sm transition-colors disabled:opacity-50
-                         disabled:cursor-not-allowed"
+              className="btn-primary w-full py-2.5"
             >
               {session.status === 'idle' ? 'Start New Session' : 'New Session'}
             </button>
@@ -112,7 +110,7 @@ export default function Session() {
         </div>
 
         {/* Chat Window (center) */}
-        <div className="flex-1 flex flex-col bg-white border border-[#E2E8F0] rounded-xl overflow-hidden min-h-0">
+        <div className="flex-1 flex flex-col glass-card p-0 overflow-hidden min-h-0">
           {session.status === 'idle' ? (
             /* Pre-session state */
             <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
@@ -127,9 +125,7 @@ export default function Session() {
               <button
                 onClick={() => session.start()}
                 disabled={session.isLoading}
-                className="bg-[#6366F1] hover:bg-[#4F46E5] text-white rounded-lg px-8 py-3
-                           font-medium text-sm transition-colors disabled:opacity-50
-                           disabled:cursor-not-allowed"
+                className="btn-primary px-8 py-3"
               >
                 {session.isLoading ? 'Starting...' : 'Start Session'}
               </button>
@@ -144,7 +140,7 @@ export default function Session() {
 
               {/* Input (sticky bottom) */}
               {session.status === 'active' && (
-                <div className="border-t border-[#E2E8F0]">
+                <div className="border-t border-[rgba(99,102,241,0.08)] bg-[rgba(255,255,255,0.4)]">
                   <GradientBar height={3} />
                   <form
                     onSubmit={handleSend}
@@ -156,15 +152,12 @@ export default function Session() {
                       onChange={(e) => setInputText(e.target.value)}
                       placeholder="Add to your order..."
                       disabled={session.isLoading}
-                      className="flex-1 text-sm text-[#111827] placeholder:text-[#6B7280]
-                                 focus:outline-none disabled:opacity-50"
+                      className="form-input flex-1 disabled:opacity-50"
                     />
                     <button
                       type="submit"
                       disabled={session.isLoading || !inputText.trim()}
-                      className="ml-3 bg-[#6366F1] hover:bg-[#4F46E5] text-white rounded-lg
-                                 px-4 py-2 text-sm font-medium transition-colors
-                                 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="btn-primary ml-3 px-4 py-2"
                     >
                       Send
                     </button>
@@ -173,7 +166,7 @@ export default function Session() {
               )}
 
               {session.status === 'closed' && (
-                <div className="border-t border-[#E2E8F0] px-4 py-3 bg-gray-50 text-center">
+                <div className="border-t border-[rgba(99,102,241,0.08)] px-4 py-3 bg-[rgba(255,255,255,0.6)] text-center">
                   <p className="text-sm text-[#6B7280]">
                     Session closed. Order has been confirmed and saved.
                   </p>
@@ -216,8 +209,7 @@ export default function Session() {
           <button
             onClick={() => session.start()}
             disabled={session.isLoading}
-            className="w-full bg-[#6366F1] hover:bg-[#4F46E5] text-white rounded-lg py-3
-                       font-medium text-sm transition-colors disabled:opacity-50"
+            className="btn-primary w-full py-3"
           >
             {session.isLoading ? 'Starting...' : 'Start New Session'}
           </button>

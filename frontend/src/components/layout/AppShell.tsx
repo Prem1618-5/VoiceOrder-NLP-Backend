@@ -1,17 +1,20 @@
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
-import Sidebar from './Sidebar';
-import ContentHeader from './ContentHeader';
+import TopNav from './TopNav';
 
 export default function AppShell() {
   const { isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
 
   /* ── Wait for auth state to hydrate from localStorage ─────────────────── */
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center" role="status">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#6366F1] border-t-transparent" />
-        <span className="sr-only">Loading…</span>
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-9 w-9 animate-spin rounded-full border-[3px] border-[#6366F1] border-t-transparent" />
+          <p className="text-sm text-[#6B7280] font-medium">Loading…</p>
+        </div>
+        <span className="sr-only">Loading application</span>
       </div>
     );
   }
@@ -21,18 +24,25 @@ export default function AppShell() {
     return <Navigate to="/login" replace />;
   }
 
-  return (
-    <div className="min-h-screen p-6">
-      <main className="bg-white rounded-[20px] shadow-xl flex min-h-[calc(100vh-48px)] overflow-hidden">
-        {/* ── Sidebar (220 px) ──────────────────────────────────────────── */}
-        <Sidebar />
+  /* ── Page title derived from route for the document title ─────────────── */
+  const pageTitles: Record<string, string> = {
+    '/': 'Dashboard',
+    '/parse': 'Parse Order',
+    '/session': 'Session Chat',
+    '/history': 'History',
+  };
+  const pageTitle = pageTitles[location.pathname] ?? 'VoiceOrder';
+  document.title = `${pageTitle} — VoiceOrder NLP`;
 
-        {/* ── Content area ──────────────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col bg-[#F8FAFC]">
-          <ContentHeader />
-          <main className="flex-1 overflow-y-auto px-6 py-5">
-            <Outlet />
-          </main>
+  return (
+    <div className="min-h-screen flex flex-col">
+      {/* ── Sticky top glass nav ──────────────────────────────────────────── */}
+      <TopNav />
+
+      {/* ── Page content ─────────────────────────────────────────────────── */}
+      <main className="flex-1 max-w-7xl mx-auto w-full px-6 py-6">
+        <div className="page-enter">
+          <Outlet />
         </div>
       </main>
     </div>

@@ -70,7 +70,7 @@ export default function OrderInput({ onParse, isLoading }: OrderInputProps) {
           value={text}
           onChange={handleTextChange}
           placeholder="Type a food order…"
-          className="w-full bg-white border border-[#E2E8F0] rounded-lg px-3 py-2.5 text-sm text-[#111827] placeholder:text-[#6B7280]/60 resize-y focus:outline-none focus:ring-2 focus:ring-[#6366F1] focus:border-transparent transition-shadow"
+          className="form-input resize-y text-sm disabled:opacity-60"
           aria-describedby="char-count"
           disabled={isLoading}
         />
@@ -100,7 +100,7 @@ export default function OrderInput({ onParse, isLoading }: OrderInputProps) {
           id="menu-id"
           value={menuId}
           onChange={(e) => setMenuId(e.target.value)}
-          className="w-full bg-white border border-[#E2E8F0] rounded-lg px-3 py-2 text-sm text-[#111827] focus:outline-none focus:ring-2 focus:ring-[#6366F1] focus:border-transparent transition-shadow"
+          className="form-input text-sm disabled:opacity-60"
           disabled={isLoading}
         >
           <option value="default">default</option>
@@ -111,7 +111,7 @@ export default function OrderInput({ onParse, isLoading }: OrderInputProps) {
       <button
         type="submit"
         disabled={isDisabled}
-        className="w-full bg-[#6366F1] hover:bg-[#4F46E5] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg py-2.5 font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-[#6366F1] focus:ring-offset-2"
+        className="btn-primary w-full py-2.5"
       >
         {isLoading ? (
           <span className="inline-flex items-center gap-2">

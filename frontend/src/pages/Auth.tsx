@@ -83,7 +83,7 @@ export default function Auth() {
          style={{
            background: 'linear-gradient(135deg, #FFD6E0 0%, #FFE4E4 25%, #DAE8F5 65%, #D0F5E5 100%)',
          }}>
-      <div className="w-full max-w-[400px] bg-white rounded-2xl shadow-xl p-8">
+      <div className="w-full max-w-[400px] glass-card-high p-8">
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-2 mb-2">
@@ -115,9 +115,7 @@ export default function Auth() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="w-full px-3 py-2.5 border border-[#E2E8F0] rounded-lg text-sm
-                         focus:outline-none focus:ring-2 focus:ring-[#6366F1] focus:border-transparent
-                         placeholder:text-[#6B7280]"
+              className="form-input"
               placeholder="you@example.com"
             />
           </div>
@@ -133,9 +131,7 @@ export default function Auth() {
               onChange={(e) => setPassword(e.target.value)}
               required
               minLength={8}
-              className="w-full px-3 py-2.5 border border-[#E2E8F0] rounded-lg text-sm
-                         focus:outline-none focus:ring-2 focus:ring-[#6366F1] focus:border-transparent
-                         placeholder:text-[#6B7280]"
+              className="form-input"
               placeholder={isRegister ? 'Min 8 characters' : '••••••••'}
             />
           </div>
@@ -145,8 +141,7 @@ export default function Auth() {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-[#6366F1] hover:bg-[#4F46E5] text-white rounded-lg py-2.5
-                       font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-primary w-full py-2.5"
           >
             {isLoading ? 'Please wait...' : isRegister ? 'Create Account' : 'Sign In'}
           </button>
@@ -181,9 +176,7 @@ export default function Auth() {
             <button
               onClick={handleDemoLogin}
               disabled={isLoading}
-              className="mt-4 w-full border border-[#E2E8F0] text-[#111827] rounded-lg py-2.5
-                         font-medium text-sm hover:bg-[#F8FAFC] transition-colors
-                         disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn-ghost w-full py-2.5 mt-4"
             >
               Use Demo Account
             </button>

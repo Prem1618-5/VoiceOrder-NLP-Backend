@@ -16,12 +16,10 @@ interface ParseResultProps {
 
 /* ── Helpers ───────────────────────────────────────────────────────────────── */
 
-/** Shared card wrapper. */
+/** Shared card wrapper — glass card style. */
 function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
-    <div
-      className={`bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-sm ${className}`}
-    >
+    <div className={`glass-card p-5 ${className}`}>
       {children}
     </div>
   );

@@ -2,7 +2,8 @@
 VoiceOrder NLP Pipeline — 6-step extraction engine.
 
 Step 1 — Preprocess
-    Lowercase, strip control chars (NLP injection defence), normalize numbers.
+    Lowercase, strip control chars (NLP injection defence), normalize numbers,
+    strip unit words (cans/order of/cups/bottles) so proximity windows work.
 
 Step 2 — spaCy EntityRuler   (runs BEFORE NER)
     Custom FOOD / SIZE / MODIFIER patterns from menu vocab.
@@ -11,9 +12,9 @@ Step 3 — spaCy NER
     CARDINAL (qty), discard GPE/ORG/etc.; custom labels pass through.
 
 Step 4 — Entity Assembly
-    qty  ← CARDINAL within 3 tokens of FOOD
-    size ← SIZE entity modifying FOOD
-    mods ← MODIFIER + following token
+    qty  ← CARDINAL nearest to each specific FOOD (within 5 tokens)
+    size ← SIZE entity nearest to each specific FOOD (within 6 tokens)
+    mods ← MODIFIER nearest to each specific FOOD (per-item scoping)
 
 Step 5 — Menu Matching
     rapidfuzz.process.extractOne(query, menu_names, score_cutoff=75)
@@ -85,6 +86,25 @@ def get_nlp() -> Language:
 
 # ── Step 1: Preprocessing ─────────────────────────────────────────────────────
 
+# Unit words that sit between a CARDINAL and a FOOD entity.
+# e.g. "three CANS of diet coke", "one ORDER of garlic bread"
+# These inflate the token distance and prevent CARDINAL→FOOD association.
+_UNIT_WORDS = {
+    "can", "cans",
+    "bottle", "bottles",
+    "cup", "cups",
+    "bowl", "bowls",
+    "box", "boxes",
+    "piece", "pieces",
+    "slice", "slices",
+    "portion", "portions",
+    "serving", "servings",
+    "glass", "glasses",
+    "plate", "plates",
+    "order",  # "one order of garlic bread" → "one garlic bread"
+    "of",     # "three cans OF diet coke" — 'of' is a connector after unit word
+}
+
 
 def _preprocess(text: str) -> str:
     """
@@ -97,6 +117,8 @@ def _preprocess(text: str) -> str:
     text = re.sub(r"[\x00-\x1F\x7F]", "", text)
     # Hard truncation
     text = text[:500]
+    # Remove basic punctuation that attaches to words and breaks exact token matching
+    text = text.replace(",", " ").replace(".", " ")
     # Lowercase + normalise whitespace
     text = " ".join(text.lower().split())
     return text
@@ -114,13 +136,53 @@ def _normalize_numbers(text: str) -> str:
     return " ".join(result)
 
 
+def _strip_unit_words(text: str) -> str:
+    """
+    Remove unit/container words that sit between a number and a food name.
+    e.g. "3 cans of diet coke" → "3 diet coke"
+         "1 order of garlic bread" → "1 garlic bread"
+
+    This is done after number normalisation so we handle both
+    digit forms ("3") and word forms ("three" → already converted to "3").
+    """
+    tokens = text.split()
+    result: List[str] = []
+    for token in tokens:
+        if token in _UNIT_WORDS:
+            continue  # drop the unit word entirely
+        result.append(token)
+    return " ".join(result)
+
+
 # ── Step 4: Entity Assembly ───────────────────────────────────────────────────
 
 _ALLOWED_LABELS = {"FOOD", "SIZE", "MODIFIER", "CARDINAL"}
 _DISCARD_LABELS = {"GPE", "ORG", "PERSON", "LOC", "DATE", "TIME", "MONEY", "PERCENT"}
 
-# Token window for associating CARDINAL with adjacent FOOD
-_QTY_WINDOW = 3
+# Expanded token window: handles "3 diet coke" (after unit-word stripping)
+# and cases where size/modifier tokens still sit between cardinal and food.
+_QTY_WINDOW = 5
+
+
+def _token_position(tokens: List[str], phrase: str) -> Optional[int]:
+    """Return the index of the first token of `phrase` in `tokens`, or None."""
+    phrase_tokens = phrase.split()
+    for i in range(len(tokens) - len(phrase_tokens) + 1):
+        if tokens[i : i + len(phrase_tokens)] == phrase_tokens:
+            return i
+    return None
+
+
+def _get_nearest_food(ent_pos: int, food_positions: List[Tuple[Optional[int], RawEntity]]) -> Optional[int]:
+    nearest_food_pos = None
+    nearest_food_dist = float("inf")
+    for other_pos, _ in food_positions:
+        if other_pos is not None:
+            d = abs(ent_pos - other_pos)
+            if d < nearest_food_dist:
+                nearest_food_dist = d
+                nearest_food_pos = other_pos
+    return nearest_food_pos
 
 
 def _assemble_items(
@@ -131,64 +193,67 @@ def _assemble_items(
 
     Rules:
       qty   ← CARDINAL within _QTY_WINDOW tokens of a FOOD entity
-      size  ← SIZE entity that appears before or after a FOOD entity
-      mods  ← MODIFIER + the token(s) that follow it
+      size  ← SIZE entity nearest to each FOOD entity (within window)
+      mods  ← MODIFIER entities scoped per-item (between neighbouring foods)
+
+    Fix vs. original:
+      - Token window expanded to 5 (was 3)
+      - Modifiers, sizes, and cardinals are scoped per-item: each is attached
+        to the nearest FOOD entity, preventing cross-contamination.
     """
     items: List[OrderItem] = []
     tokens = processed_text.split()
 
-    # Collect FOOD entities in order
+    # Collect entity groups
     food_ents = [e for e in raw_entities if e.label == "FOOD"]
     cardinal_ents = [e for e in raw_entities if e.label == "CARDINAL"]
     size_ents = [e for e in raw_entities if e.label == "SIZE"]
     modifier_ents = [e for e in raw_entities if e.label == "MODIFIER"]
 
-    for food in food_ents:
-        food_tokens = food.text.split()
-        # Find position of this food entity in the token list
-        food_pos = next(
-            (i for i, t in enumerate(tokens) if t == food_tokens[0]),
-            None,
-        )
+    # Pre-compute token positions for all entities
+    food_positions = [(_token_position(tokens, f.text), f) for f in food_ents]
 
-        # Quantity — nearest CARDINAL within window
+    for food_pos, food in food_positions:
+        # ── Quantity (per-item scoped) ───────────────────────────────────────
         qty = 1
         for card in cardinal_ents:
-            card_pos = next(
-                (i for i, t in enumerate(tokens) if t == card.text),
-                None,
-            )
+            card_pos = _token_position(tokens, card.text)
             if card_pos is not None and food_pos is not None:
-                if abs(card_pos - food_pos) <= _QTY_WINDOW:
-                    try:
-                        qty = int(card.text)
-                    except ValueError:
-                        pass
-                    break
+                nearest_food = _get_nearest_food(card_pos, food_positions)
+                if nearest_food == food_pos:
+                    if abs(card_pos - food_pos) <= _QTY_WINDOW:
+                        try:
+                            qty = int(card.text)
+                        except ValueError:
+                            pass
 
-        # Size — first SIZE entity nearest to this food
+        # ── Size (per-item scoped) ───────────────────────────────────────────
         size: Optional[str] = None
         for size_ent in size_ents:
-            size_pos = next(
-                (i for i, t in enumerate(tokens) if t == size_ent.text),
-                None,
-            )
+            size_pos = _token_position(tokens, size_ent.text)
             if size_pos is not None and food_pos is not None:
-                if abs(size_pos - food_pos) <= _QTY_WINDOW + 1:
-                    size = size_ent.text
-                    break
+                nearest_food = _get_nearest_food(size_pos, food_positions)
+                if nearest_food == food_pos:
+                    if abs(size_pos - food_pos) <= _QTY_WINDOW + 1:
+                        size = size_ent.text
 
-        # Modifiers — all MODIFIER tokens + their following word
+        # ── Modifiers (per-item scoped) ──────────────────────────────────────
         mods: List[str] = []
         for mod_ent in modifier_ents:
-            mod_pos = next(
-                (i for i, t in enumerate(tokens) if t == mod_ent.text),
-                None,
-            )
-            if mod_pos is not None:
-                next_word = tokens[mod_pos + 1] if mod_pos + 1 < len(tokens) else ""
-                if next_word and next_word not in [f.text for f in food_ents]:
-                    mods.append(f"{mod_ent.text} {next_word}".strip())
+            mod_pos = _token_position(tokens, mod_ent.text)
+            if mod_pos is None or food_pos is None:
+                continue
+
+            nearest_food = _get_nearest_food(mod_pos, food_positions)
+            if nearest_food != food_pos:
+                continue
+
+            # Build modifier string: modifier token + following word
+            next_word = tokens[mod_pos + 1] if mod_pos + 1 < len(tokens) else ""
+            if next_word and next_word not in [f.text.split()[0] for f, _ in
+                                               [(fe, None) for fe in food_ents]]:
+                # Remove punctuation from modifier next word if needed, but for now just strip
+                mods.append(f"{mod_ent.text} {next_word.strip(',.')}".strip())
 
         items.append(OrderItem(name=food.text, quantity=qty, size=size, modifiers=mods))
 
@@ -274,6 +339,7 @@ def extract_entities(text: str) -> ParsedOrder:
     # ── Step 1: Preprocess ────────────────────────────────────────────────────
     processed = _preprocess(text)
     processed = _normalize_numbers(processed)
+    processed = _strip_unit_words(processed)  # NEW: strip "cans of", "order of"
 
     # ── Steps 2 & 3: spaCy pipeline (EntityRuler + NER) ──────────────────────
     doc = nlp(processed)
