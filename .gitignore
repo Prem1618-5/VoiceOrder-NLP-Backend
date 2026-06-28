@@ -60,3 +60,8 @@ en_core_web_sm/
 
 docs/
 .env
+
+# ── Frontend (Vite + React) ──────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.env

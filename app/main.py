@@ -75,7 +75,7 @@ app.add_middleware(SlowAPIMiddleware)
 if settings.is_production:
     _cors_origins = settings.allowed_origins_list
 else:
-    _cors_origins = ["http://localhost:3000", "http://localhost:5500"]
+    _cors_origins = ["http://localhost:3000", "http://localhost:5500", "http://localhost:5173"]
 
 app.add_middleware(
     CORSMiddleware,

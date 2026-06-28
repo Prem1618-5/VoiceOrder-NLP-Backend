@@ -1,0 +1,292 @@
+@import "tailwindcss";
+
+/* ── Design Tokens (Tailwind v4 @theme) ───────────────────────────────────── */
+@theme {
+  /* Aurora gradient (outer wrapper only) */
+  --color-aurora-pink: #FFB3C6;
+  --color-aurora-peach: #FFCACA;
+  --color-aurora-blue: #C5D9F0;
+  --color-aurora-mint: #B3F0D8;
+
+  /* Sidebar (dark) */
+  --color-sidebar: #1C1C1E;
+  --color-sidebar-text: #FFFFFF;
+  --color-sidebar-muted: rgba(255, 255, 255, 0.55);
+  --color-sidebar-active: rgba(255, 255, 255, 0.12);
+  --color-sidebar-hover: rgba(255, 255, 255, 0.06);
+  --color-sidebar-accent: #6366F1;
+
+  /* Content area (light) */
+  --color-content: #F8FAFC;
+  --color-card: #FFFFFF;
+  --color-card-border: #E2E8F0;
+  --color-text-primary: #111827;
+  --color-text-muted: #6B7280;
+
+  /* Semantic accents */
+  --color-success: #16A34A;
+  --color-ai: #6366F1;
+  --color-warning: #D97706;
+  --color-error: #DC2626;
+  --color-link: #2563EB;
+
+  /* NLP entity light-mode pills */
+  --color-entity-food-bg: #EEF2FF;
+  --color-entity-food-text: #4338CA;
+  --color-entity-food-border: #C7D2FE;
+  --color-entity-size-bg: #FEF3C7;
+  --color-entity-size-text: #92400E;
+  --color-entity-size-border: #FDE68A;
+  --color-entity-modifier-bg: #DCFCE7;
+  --color-entity-modifier-text: #166534;
+  --color-entity-modifier-border: #BBF7D0;
+  --color-entity-cardinal-bg: #E0F2FE;
+  --color-entity-cardinal-text: #075985;
+  --color-entity-cardinal-border: #BAE6FD;
+
+  /* Typography */
+  --font-sans: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Spacing & Radius */
+  --radius-main: 20px;
+  --radius-card: 12px;
+  --radius-input: 8px;
+}
+
+/* ── Base Styles ──────────────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-family: var(--font-sans);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #FFB3C6 0%, #FFCACA 25%, #C5D9F0 65%, #B3F0D8 100%);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* ── Gradient Bar ─────────────────────────────────────────────────────────── */
+
+.gradient-bar {
+  height: 4px;
+  background: linear-gradient(90deg, #F9A8D4 0%, #FCA5A5 35%, #BAE6FD 70%, #A7F3D0 100%);
+  border-radius: 2px;
+}
+
+.gradient-bar-3 {
+  height: 3px;
+  background: linear-gradient(90deg, #F9A8D4 0%, #FCA5A5 35%, #BAE6FD 70%, #A7F3D0 100%);
+  border-radius: 1.5px;
+}
+
+/* ── Entity Animation ─────────────────────────────────────────────────────── */
+
+@keyframes entityFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.entity-pill {
+  animation: entityFadeIn 200ms ease-out both;
+}
+
+/* ── Confidence bar fill ──────────────────────────────────────────────────── */
+
+@keyframes confidenceFill {
+  from { width: 0%; }
+}
+
+.confidence-bar-fill {
+  animation: confidenceFill 600ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/* ── Chat bubble animation ────────────────────────────────────────────────── */
+
+@keyframes bubbleEnter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.chat-bubble {
+  animation: bubbleEnter 150ms ease-out both;
+}
+
+/* ── Slide-over panel ─────────────────────────────────────────────────────── */
+
+@keyframes slideOverIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes slideOverOut {
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
+}
+
+.slide-over-enter {
+  animation: slideOverIn 250ms ease-out both;
+}
+
+.slide-over-exit {
+  animation: slideOverOut 250ms ease-out both;
+}
+
+/* ── Status dot pulse ─────────────────────────────────────────────────────── */
+
+@keyframes statusPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.status-pulse-slow {
+  animation: statusPulse 2000ms ease-in-out infinite;
+}
+
+.status-pulse-fast {
+  animation: statusPulse 500ms ease-in-out infinite;
+}
+
+/* ── Metric card refresh ──────────────────────────────────────────────────── */
+
+@keyframes metricFade {
+  from { opacity: 0.6; }
+  to { opacity: 1; }
+}
+
+.metric-refresh {
+  animation: metricFade 300ms ease both;
+}
+
+/* ── Order item slide-down ────────────────────────────────────────────────── */
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    max-height: 200px;
+  }
+}
+
+.order-item-enter {
+  animation: slideDown 150ms ease-out both;
+}
+
+/* ── Quantity change flash ────────────────────────────────────────────────── */
+
+@keyframes quantityFlash {
+  0% { background-color: #FEF3C7; }
+  100% { background-color: transparent; }
+}
+
+.quantity-flash {
+  animation: quantityFlash 200ms ease-in-out both;
+}
+
+/* ── Skeleton shimmer ─────────────────────────────────────────────────────── */
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #F1F5F9 25%, #E2E8F0 50%, #F1F5F9 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 8px;
+}
+
+/* ── Focus ring ───────────────────────────────────────────────────────────── */
+
+*:focus-visible {
+  outline: 2px solid #6366F1;
+  outline-offset: 2px;
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── JSON Viewer (GitHub Light) ───────────────────────────────────────────── */
+
+.json-viewer {
+  background: #F6F8FA;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 16px;
+  border-radius: var(--radius-card);
+  overflow-x: auto;
+}
+
+.json-key { color: #953800; }
+.json-string { color: #0A3069; }
+.json-number { color: #0550AE; }
+.json-boolean { color: #CF222E; }
+.json-null { color: #6E7781; }
+.json-bracket { color: #24292F; }
+.json-toggle {
+  cursor: pointer;
+  user-select: none;
+  color: #6E7781;
+}
+.json-toggle:hover { color: #24292F; }
