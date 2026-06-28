@@ -18,6 +18,8 @@ class RawEntity(BaseModel):
     label: str  # FOOD | SIZE | MODIFIER | CARDINAL
     start: int  # character offset in processed text
     end: int
+    start_token: Optional[int] = None
+    end_token: Optional[int] = None
 
 
 # ── Assembled order item ──────────────────────────────────────────────────────

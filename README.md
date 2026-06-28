@@ -138,7 +138,7 @@ voiceorder/
 
 ---
 
-## NLP Pipeline (6 Steps)
+## NLP Pipeline (7 Steps)
 
 ```
 Input text
@@ -154,26 +154,31 @@ Step 2 — Number normalization
   word2number: "two large" → "2 large"
 
   ▼
-Step 3 — spaCy EntityRuler (BEFORE NER)
-  FOOD:     exact + token-level match from 50-item menu
+Step 3 — spaCy EntityRuler & NER
+  FOOD:     exact + token-level match from menu
   SIZE:     small | medium | large | xl | mini | regular
   MODIFIER: extra | no | without | add | light | double | …
+  CARDINAL: quantity integers (spaCy built-in)
 
   ▼
-Step 4 — spaCy NER
-  CARDINAL: quantity integers (spaCy built-in)
-  Discards: GPE, ORG, PERSON, LOC, DATE, TIME, MONEY, PERCENT
+Step 4 — Advanced Resolution
+  Coref:         Resolves pronouns/shorthand ("the mutton" → "mutton biryani")
+  Compositional: Anchors primary items ("chicken", "garlic") to secondary styles ("biryani", "naan") 
+                 spanning up to 12 tokens apart.
+  N-gram Fallback: Captures partial/fuzzy matches missed by exact matching (using rapidfuzz)
+  Deduplication: Removes overlapping exact boundary matches
 
   ▼
 Step 5 — Entity Assembly
-  qty   ← nearest CARDINAL within 3 tokens of FOOD
-  size  ← SIZE entity within 4 tokens of FOOD
-  mods  ← MODIFIER + following token
+  qty   ← nearest CARDINAL within 7 tokens of FOOD
+  size  ← SIZE entity within 8 tokens of FOOD
+  mods  ← MODIFIER + following token (skips conversational negations like "no make that")
 
   ▼
-Step 6 — Menu Matching (rapidfuzz)
-  fuzz.token_sort_ratio, score_cutoff=75
+Step 6 — Menu Matching & Deduplication
+  fuzz.WRatio against menu items
   Miss → for_review=true + nearest suggestion
+  Merge identical items, accumulating max quantity and unique modifiers
 
   ▼
 Step 7 — Confidence

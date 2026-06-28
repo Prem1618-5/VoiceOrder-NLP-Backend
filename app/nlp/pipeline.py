@@ -36,8 +36,12 @@ from spacy.language import Language
 from word2number import w2n
 
 from app.config import settings
-from app.nlp.entity_ruler import DEFAULT_MENU_ITEMS, build_entity_ruler
-from app.nlp.schemas import OrderItem, ParsedOrder, RawEntity
+from app.nlp.schemas import ParsedOrder, OrderItem, RawEntity
+from app.nlp.entity_ruler import build_entity_ruler
+from app.nlp.indian_menu_items import INDIAN_MENU_ITEMS
+from app.nlp.coref import resolve_coreferences
+from app.nlp.ngram_fallback import find_missing_foods
+from app.nlp.compositional import resolve_compositional
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +64,7 @@ def load_model(menu_items: Optional[List[Dict[str, Any]]] = None) -> Language:
     if _nlp is not None:
         return _nlp
 
-    items = menu_items if menu_items is not None else DEFAULT_MENU_ITEMS
+    items = menu_items if menu_items is not None else INDIAN_MENU_ITEMS
 
     logger.info("Loading spaCy model '%s'…", settings.SPACY_MODEL)
     nlp = spacy.load(settings.SPACY_MODEL, disable=["parser", "lemmatizer"])
@@ -126,13 +130,18 @@ def _preprocess(text: str) -> str:
 
 def _normalize_numbers(text: str) -> str:
     """Convert written-out numbers to digits: 'two' → '2', 'three' → '3'."""
+    text = text.replace("a couple of", "2")
     tokens = text.split()
     result: List[str] = []
+    hindi_numbers = {"ek": "1", "do": "2", "teen": "3", "chaar": "4", "paanch": "5"}
     for token in tokens:
-        try:
-            result.append(str(w2n.word_to_num(token)))
-        except ValueError:
-            result.append(token)
+        if token in hindi_numbers:
+            result.append(hindi_numbers[token])
+        else:
+            try:
+                result.append(str(w2n.word_to_num(token)))
+            except ValueError:
+                result.append(token)
     return " ".join(result)
 
 
@@ -161,99 +170,100 @@ _DISCARD_LABELS = {"GPE", "ORG", "PERSON", "LOC", "DATE", "TIME", "MONEY", "PERC
 
 # Expanded token window: handles "3 diet coke" (after unit-word stripping)
 # and cases where size/modifier tokens still sit between cardinal and food.
-_QTY_WINDOW = 5
+_QTY_WINDOW = 7
 
 
-def _token_position(tokens: List[str], phrase: str) -> Optional[int]:
-    """Return the index of the first token of `phrase` in `tokens`, or None."""
-    phrase_tokens = phrase.split()
-    for i in range(len(tokens) - len(phrase_tokens) + 1):
-        if tokens[i : i + len(phrase_tokens)] == phrase_tokens:
-            return i
-    return None
-
-
-def _get_nearest_food(ent_pos: int, food_positions: List[Tuple[Optional[int], RawEntity]]) -> Optional[int]:
-    nearest_food_pos = None
-    nearest_food_dist = float("inf")
-    for other_pos, _ in food_positions:
-        if other_pos is not None:
-            d = abs(ent_pos - other_pos)
-            if d < nearest_food_dist:
-                nearest_food_dist = d
-                nearest_food_pos = other_pos
-    return nearest_food_pos
-
-
-def _assemble_items(
-    raw_entities: List[RawEntity], processed_text: str
-) -> List[OrderItem]:
+def _assemble_items(raw_entities: List[RawEntity], doc_tokens: List[str]) -> List[OrderItem]:
     """
-    Convert flat list of raw entities into structured OrderItem objects.
-
-    Rules:
-      qty   ← CARDINAL within _QTY_WINDOW tokens of a FOOD entity
-      size  ← SIZE entity nearest to each FOOD entity (within window)
-      mods  ← MODIFIER entities scoped per-item (between neighbouring foods)
-
-    Fix vs. original:
-      - Token window expanded to 5 (was 3)
-      - Modifiers, sizes, and cardinals are scoped per-item: each is attached
-        to the nearest FOOD entity, preventing cross-contamination.
+    Given a list of RawEntity objects and the spaCy tokens, group modifiers/sizes/quantities 
+    with their nearest FOOD entity.
     """
     items: List[OrderItem] = []
-    tokens = processed_text.split()
-
+    
     # Collect entity groups
     food_ents = [e for e in raw_entities if e.label == "FOOD"]
     cardinal_ents = [e for e in raw_entities if e.label == "CARDINAL"]
     size_ents = [e for e in raw_entities if e.label == "SIZE"]
     modifier_ents = [e for e in raw_entities if e.label == "MODIFIER"]
 
-    # Pre-compute token positions for all entities
-    food_positions = [(_token_position(tokens, f.text), f) for f in food_ents]
+    def _get_nearest_food(pos: int) -> Optional[RawEntity]:
+        if not food_ents:
+            return None
+        # Prefer foods that come AFTER the modifier/cardinal if distance is tied
+        def sort_key(f):
+            f_pos = f.start_token
+            dist = abs(pos - f_pos)
+            if dist <= 2:
+                tie = -1 if f_pos > pos else 1
+            else:
+                tie = -1 if f_pos < pos else 1
+            return (dist, tie)
+        return min(food_ents, key=sort_key)
 
-    for food_pos, food in food_positions:
+    for food in food_ents:
+        food_pos = food.start_token
+        if food_pos is None:
+            continue
+
         # ── Quantity (per-item scoped) ───────────────────────────────────────
         qty = 1
+        valid_cards = []
         for card in cardinal_ents:
-            card_pos = _token_position(tokens, card.text)
-            if card_pos is not None and food_pos is not None:
-                nearest_food = _get_nearest_food(card_pos, food_positions)
-                if nearest_food == food_pos:
-                    if abs(card_pos - food_pos) <= _QTY_WINDOW:
-                        try:
-                            qty = int(card.text)
-                        except ValueError:
-                            pass
+            card_pos = card.start_token
+            if card_pos is not None:
+                nearest = _get_nearest_food(card_pos)
+                if nearest == food and abs(card_pos - food_pos) <= _QTY_WINDOW:
+                    try:
+                        valid_cards.append((abs(card_pos - food_pos), int(card.text)))
+                    except ValueError:
+                        pass
+        if valid_cards:
+            valid_cards.sort(key=lambda x: x[0])
+            qty = valid_cards[0][1]
 
         # ── Size (per-item scoped) ───────────────────────────────────────────
         size: Optional[str] = None
+        valid_sizes = []
         for size_ent in size_ents:
-            size_pos = _token_position(tokens, size_ent.text)
-            if size_pos is not None and food_pos is not None:
-                nearest_food = _get_nearest_food(size_pos, food_positions)
-                if nearest_food == food_pos:
-                    if abs(size_pos - food_pos) <= _QTY_WINDOW + 1:
-                        size = size_ent.text
+            size_pos = size_ent.start_token
+            if size_pos is not None:
+                nearest = _get_nearest_food(size_pos)
+                if nearest == food and abs(size_pos - food_pos) <= _QTY_WINDOW + 1:
+                    valid_sizes.append((abs(size_pos - food_pos), size_ent.text))
+        if valid_sizes:
+            valid_sizes.sort(key=lambda x: x[0])
+            size = valid_sizes[0][1]
 
         # ── Modifiers (per-item scoped) ──────────────────────────────────────
-        mods: List[str] = []
+        food_mods = []
         for mod_ent in modifier_ents:
-            mod_pos = _token_position(tokens, mod_ent.text)
-            if mod_pos is None or food_pos is None:
+            mod_pos = mod_ent.start_token
+            if mod_pos is not None and _get_nearest_food(mod_pos) == food:
+                food_mods.append(mod_ent)
+
+        mods: List[str] = []
+        skip_next = False
+        stopwords = {"a", "an", "the", "some", "of", "make", "that"}
+        for i, mod_ent in enumerate(food_mods):
+            if skip_next:
+                skip_next = False
                 continue
 
-            nearest_food = _get_nearest_food(mod_pos, food_positions)
-            if nearest_food != food_pos:
-                continue
-
-            # Build modifier string: modifier token + following word
-            next_word = tokens[mod_pos + 1] if mod_pos + 1 < len(tokens) else ""
-            if next_word and next_word not in [f.text.split()[0] for f, _ in
-                                               [(fe, None) for fe in food_ents]]:
-                # Remove punctuation from modifier next word if needed, but for now just strip
-                mods.append(f"{mod_ent.text} {next_word.strip(',.')}".strip())
+            next_word_idx = mod_ent.end_token
+            next_word = doc_tokens[next_word_idx] if next_word_idx is not None and next_word_idx < len(doc_tokens) else ""
+            
+            if next_word and next_word not in [f.text.split()[0] for f in food_ents]:
+                if mod_ent.text.lower() == "no" and next_word.lower() in {"make", "wait", "actually", "instead"}:
+                    # Conversational correction, not a food modifier
+                    continue
+                elif next_word in stopwords:
+                    mods.append(mod_ent.text)
+                else:
+                    mods.append(f"{mod_ent.text} {next_word.strip(',.')}".strip())
+                    if i + 1 < len(food_mods) and food_mods[i+1].start_token == next_word_idx:
+                        skip_next = True
+            else:
+                mods.append(mod_ent.text)
 
         items.append(OrderItem(name=food.text, quantity=qty, size=size, modifiers=mods))
 
@@ -357,21 +367,77 @@ def extract_entities(text: str) -> ParsedOrder:
                 label=label,
                 start=ent.start_char,
                 end=ent.end_char,
+                start_token=ent.start,
+                end_token=ent.end,
             )
         )
 
     logger.debug("Extracted %d entities from '%s'", len(raw_entities), processed)
 
-    # ── Step 4: Entity Assembly ───────────────────────────────────────────────
-    items = _assemble_items(raw_entities, processed)
+    # ── Step 3: Entity Assembly ───────────────────────────────────────────────
+    doc_tokens = [t.text for t in doc]
+    menu_names = [m["name"].lower() for m in INDIAN_MENU_ITEMS]
 
-    # ── Step 5: Menu Matching ─────────────────────────────────────────────────
-    matched_items: List[OrderItem] = []
-    fuzzy_scores: List[float] = []
+    # 1. Resolve coreferences
+    new_corefs = resolve_coreferences(doc_tokens, raw_entities)
+    # only keep corefs that were added
+    coref_added = [e for e in new_corefs if e not in raw_entities]
+    raw_entities.extend(coref_added)
+    
+    # 2. Compositional
+    comp_ents = resolve_compositional(doc_tokens, menu_names)
+    def is_occupied(ent, existing):
+        return any(
+            e.label == "FOOD" and 
+            e.start_token is not None and e.end_token is not None and
+            ent.start_token is not None and ent.end_token is not None and
+            max(e.start_token, ent.start_token) < min(e.end_token, ent.end_token)
+            for e in existing
+        )
+    comp_ents = [c for c in comp_ents if not is_occupied(c, raw_entities)]
+    raw_entities.extend(comp_ents)
+    
+    # 3. N-gram fallback
+    ngram_ents = find_missing_foods(doc_tokens, raw_entities, menu_names)
+    raw_entities.extend(ngram_ents)
+    
+    # 3.5 Deduplicate raw_entities (same label, start, end)
+    unique_raw_ents = []
+    seen = set()
+    for ent in raw_entities:
+        key = (ent.label, ent.start_token, ent.end_token)
+        if key not in seen:
+            seen.add(key)
+            unique_raw_ents.append(ent)
+    raw_entities = unique_raw_ents
+
+    # 4. Assemble components into order items
+    items = _assemble_items(raw_entities, doc_tokens)
+
+    # 5. Merge duplicates (same name and size)
+    merged_items_dict = {}
+    for item in items:
+        # Before merging, match menu so we merge on standard names
+        matched_item, score, hit = _match_menu(item)
+        if not hit:
+            key = (matched_item.name, matched_item.size)
+        else:
+            key = (matched_item.name, matched_item.size)
+            
+        if key in merged_items_dict:
+            existing = merged_items_dict[key][0]
+            # Keep max quantity
+            existing.quantity = max(existing.quantity, matched_item.quantity)
+            # Combine modifiers (unique)
+            existing.modifiers = list(dict.fromkeys(existing.modifiers + matched_item.modifiers))
+        else:
+            merged_items_dict[key] = (matched_item, score, hit)
+
+    matched_items = []
+    fuzzy_scores = []
     any_miss = False
 
-    for item in items:
-        matched_item, score, hit = _match_menu(item)
+    for matched_item, score, hit in merged_items_dict.values():
         matched_items.append(matched_item)
         fuzzy_scores.append(score)
         if not hit:
